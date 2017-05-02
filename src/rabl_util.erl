@@ -61,7 +61,7 @@ teardown_rabl() ->
 subscribe(Queue) ->
     {ok, Channel} = rabl_channel:get(),
     {ok, Client} = riak:local_client(),
-    rabl:subscribe(Channel, Queue, {?MODULE, Client}).
+    rabl:subscribe(Channel, Queue, ?MODULE, Client).
 
 unsubscribe(Tag) ->
     {ok, Channel} = rabl_channel:get(),
