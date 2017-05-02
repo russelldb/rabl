@@ -11,6 +11,8 @@
 
 -define(RABL_PG, rabl).
 
+%% @doc find a channel and return it.
+-spec get() -> {ok, pid()}.
 get() ->
     case pg2:get_closest_pid(?RABL_PG) of
         {error, {no_such_group, ?RABL_PG}} ->
@@ -24,23 +26,41 @@ get() ->
     end.
 
 %% start and "register" in pg2, assumes exchange, q, binding all exist
+%% @see rabl_util:setup_rabl/0
 -spec start() -> {ok, pid()} | {error, Reason::term()}.
 start() ->
     Conn = rabl:connect(),
     Channel = rabl:open_channel(Conn),
-    pg2:join(?RABL_PG, Channel),
+    ok = join(Channel),
     {ok, Channel}.
 
-add(Channel) ->
-    pg2:join(?RABL_PG, Channel).
+%% @doc add given `Channel' to register
+-spec add(pid()) -> ok.
+add(Channel) when is_pid(Channel) ->
+    join(Channel).
 
-close(Channel) ->
+%% @doc close `Channel'
+-spec close(pid()) -> ok.
+close(Channel) when is_pid(Channel) ->
     rabl:close_channel(Channel).
 
+%% @doc get all registered channels
+-spec get_all() -> [pid()].
 get_all() ->
     case pg2:get_members(?RABL_PG) of
         {error, _Meh} ->
             [];
         Pids when is_list(Pids) ->
             Pids
+    end.
+
+%% @private internal de-deuplication
+-spec join(pid()) -> ok.
+join(Channel) ->
+    case pg2:join(?RABL_PG, Channel) of
+        {error, {no_such_group, ?RABL_PG}} ->
+            pg2:create(?RABL_PG),
+            join(Channel);
+        ok ->
+            ok
     end.

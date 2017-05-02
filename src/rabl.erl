@@ -30,6 +30,10 @@ close_channel(Channel) when is_pid(Channel) ->
     amqp_channel:close(Channel),
     ok.
 
+-spec get_channel() -> {ok, pid()}.
+get_channel() ->
+    rabl_channel:get().
+
 -spec make_queue(pid(), binary()) -> binary().
 make_queue(Channel, Name) when is_binary(Name), is_pid(Channel) ->
     Declare = #'queue.declare'{queue = Name},

@@ -21,7 +21,7 @@ setup_rabl() ->
     io:format("made queue~n"),
     Exchange = rabl:make_exchange(Channel, NodeBin),
     io:format("made exchange~n"),
-    rabl:bind(Channel, Exchange, Queue, NodeBin),
+    _RoutingKey = rabl:bind(Channel, Exchange, Queue, NodeBin),
     io:format("queue, exchange, routing key set up ~p~n", [NodeBin]),
     rabl_channel:add(Channel),
     Queue.
@@ -43,6 +43,7 @@ put(Bucket, Key, Value) ->
     ok.
 
 %% close all channels in PG (what about connection(s)?)
+-spec teardown_rabl() -> ok.
 teardown_rabl() ->
     NodeBin = atom_to_binary(node(), utf8),
     Pids = rabl_channel:get_all(),
@@ -58,11 +59,13 @@ teardown_rabl() ->
 
 %% the repl receiver subscription
 %% TODO what about unsubscribing/tag state
+-spec subscribe(pid()) -> binary().
 subscribe(Queue) ->
     {ok, Channel} = rabl_channel:get(),
     {ok, Client} = riak:local_client(),
     rabl:subscribe(Channel, Queue, ?MODULE, Client).
 
+-spec unsubscribe(binary()) -> ok.
 unsubscribe(Tag) ->
     {ok, Channel} = rabl_channel:get(),
     rabl:unsubscribe(Channel, Tag).
