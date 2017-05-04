@@ -1,0 +1,17 @@
+{application, rabl,
+ [{description, "An OTP application"},
+  {vsn, "0.1.0"},
+  {registered, []},
+  {mod, { rabl_app, []}},
+  {applications,
+   [kernel,
+    stdlib,
+    amqp_client
+   ]},
+  {env,[]},
+  {modules, []},
+
+  {maintainers, []},
+  {licenses, []},
+  {links, []}
+ ]}.
