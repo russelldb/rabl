@@ -15,15 +15,15 @@ setup_rabl() ->
     Cluster = app_helper:get_env(riak_core, cluster_name),
     ClusterBin = term_to_binary(Cluster),
     Connection = rabl:connect(),
-    io:format("connected~n"),
+    lager:debug("connected~n"),
     Channel = rabl:open_channel(Connection),
-    io:format("got channel~n"),
+    lager:debug("got channel~n"),
     Queue = rabl:make_queue(Channel, ClusterBin),
-    io:format("made queue~n"),
+    lager:debug("made queue~n"),
     Exchange = rabl:make_exchange(Channel, ClusterBin),
-    io:format("made exchange~n"),
+    lager:debug("made exchange~n"),
     _RoutingKey = rabl:bind(Channel, Exchange, Queue, ClusterBin),
-    io:format("queue, exchange, routing key set up ~p~n", [ClusterBin]),
+    lager:debug("queue, exchange, routing key set up ~p~n", [ClusterBin]),
     rabl_channel:add(Channel),
     Queue.
 
@@ -76,7 +76,7 @@ unsubscribe(Tag) ->
 on_message(Message, Client) ->
     {{B, K}, BinObj} = binary_to_term(Message),
     Obj = riak_object:from_binary(B, K, BinObj),
-    io:format("putting ~p ~p~n", [B, K]),
+    lager:debug("putting ~p ~p~n", [B, K]),
     ok = Client:put(Obj, [asis, disable_hooks]),
     Client.
 

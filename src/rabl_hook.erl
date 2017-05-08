@@ -11,15 +11,15 @@
 
 %% Quick And Dirty test hook, expects that all the exhange etc etc are
 %% all set up in advance.
-%% @see rabl_helper:setup_rabl/0
-%% @see rabl_helper:add_hook/1
+%% @see rabl_util:setup_rabl/0
+%% @see rabl_util:add_hook/1
 rablicate(Object) ->
-    io:format("hook called~n"),
-    NodeBin = atom_to_binary(node(), utf8),
+    lager:debug("hook called~n"),
+    Cluster = app_helper:get_env(riak_core, cluster_name),
+    ClusterBin = term_to_binary(Cluster),
     {ok, Channel} = rabl:get_channel(),
-    %% TODO add B/K info, to binary for other end.
     BK = {riak_object:bucket(Object), riak_object:key(Object)},
     BinObj = riak_object:to_binary(v1, Object),
     Msg = term_to_binary({BK, BinObj}),
-    io:format("rablicating ~p~n", [BK]),
-    rabl:publish(Channel, NodeBin, NodeBin, Msg).
+    lager:debug("rablicating ~p~n", [BK]),
+    rabl:publish(Channel, ClusterBin, ClusterBin, Msg).

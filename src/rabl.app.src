@@ -6,7 +6,8 @@
   {applications,
    [kernel,
     stdlib,
-    amqp_client
+    amqp_client,
+    lager
    ]},
   {env,[]},
   {modules, []},
