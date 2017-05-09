@@ -17,7 +17,7 @@ get() ->
     case pg2:get_closest_pid(?RABL_PG) of
         {error, {no_such_group, ?RABL_PG}} ->
             pg2:create(?RABL_PG),
-            %% 'cos get is an inbuilt BIF
+            %% 'cos `get' is an inbuilt BIF
             ?MODULE:get();
         {error, {no_process, ?RABL_PG}} ->
             start();
@@ -29,7 +29,7 @@ get() ->
 %% @see rabl_util:setup_rabl/0
 -spec start() -> {ok, pid()} | {error, Reason::term()}.
 start() ->
-    Host = application:get_env(rabl, rabbit_host),
+    {ok, Host} = application:get_env(rabl, rabbit_host),
     Conn = rabl:connect(Host),
     Channel = rabl:open_channel(Conn),
     ok = join(Channel),

@@ -13,12 +13,11 @@
 
 -opaque client() :: riak_client:riak_client().
 
-%% create a new client. Uses app config to connect. Returns `{ok, Client}'
-%% where C is an opaque term to be used for other functions.
+%% create a new client. Uses app config to connect. Returns `{ok,
+%% Client}' where C is an opaque term to be used for other functions.
 -spec new() -> client().
 new() ->
-    RiakNode = application:get_env(rabl, riak_node),
-    {ok, C} = riak:client_connect(RiakNode),
+    {ok, C} = riak:local_client(),
     {ok, C}.
 
 %% put a riak_object

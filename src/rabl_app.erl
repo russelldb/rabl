@@ -7,6 +7,7 @@
 
 -behaviour(application).
 
+-export([start/0]).
 %% Application callbacks
 -export([start/2, stop/1]).
 
@@ -14,12 +15,12 @@
 %% API
 %%====================================================================
 
+start() ->
+    amqp_client:start(),
+    application:start(rabl).
+
 start(_StartType, _StartArgs) ->
-    %% check that we can connect to the riak node and all that
-    RiakNode = application:get_env(rabl, riak_node),
-    RiakCookie = application:get_env(rabl, riak_cookie),
-    erlang:set_cookie(RiakNode, RiakCookie),
-    true = net_kernel:connect_node(RiakNode),
+    lager:info("rabl started"),
     rabl_sup:start_link().
 
 %%--------------------------------------------------------------------

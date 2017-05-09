@@ -46,3 +46,22 @@ on_message(Message, Client) ->
     lager:debug("putting ~p ~p~n", [B, K]),
     ok = rabl_riak_client:put(Client, Obj, [asis, disable_hooks]),
     Client.
+
+%% sets up exchange, queue, bindings locally for a smoke test NOTE:
+%% run before starting the app. In production you'd be using shovel,
+%% which declares the queues in advance and doesn't need this step.
+setup_local_smoke_test() ->
+    application:load(rabl),
+    {ok, Host} = application:get_env(rabl, rabbit_host),
+    {ok, ClusterName} = application:get_env(rabl, cluster_name),
+    Connection = rabl:connect(Host),
+    io:format("connected~n"),
+    Channel = rabl:open_channel(Connection),
+    io:format("got channel~n"),
+    Queue = rabl:make_queue(Channel, ClusterName),
+    io:format("made queue~n"),
+    Exchange = rabl:make_exchange(Channel, ClusterName),
+    io:format("made exchange~n"),
+    RoutingKey = rabl:bind(Channel, Exchange, Queue, ClusterName),
+    RoutingKey.
+

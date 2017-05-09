@@ -105,10 +105,16 @@ publish(Channel, Exchange, RoutingKey, Message) when is_pid(Channel),
 
 
 -spec subscribe(Channel::pid(), Queue::binary(),
-                Mod::module(), State::term()) -> Tag::term().
+                Mod::module(), State::term()) -> Tag::binary().
 subscribe(Channel, Queue, Mod, State) when is_pid(Channel),
                                is_binary(Queue) ->
     Consumer = spawn(?MODULE, consume, [Channel, Mod, State]),
+    subscribe(Channel, Queue, Consumer).
+
+%% @doc subscribe for an existing process that will handle recieves
+%% itself
+-spec subscribe(Channel::pid(), Queue::binary(), Consumer::pid()) -> Tag::binary().
+subscribe(Channel, Queue, Consumer) ->
     Subscription = #'basic.consume'{queue = Queue},
     #'basic.consume_ok'{consumer_tag = Tag} = amqp_channel:subscribe(Channel, Subscription, Consumer),
     Tag.
@@ -137,3 +143,23 @@ consume(Channel, Mod, State) ->
             amqp_channel:cast(Channel, #'basic.ack'{delivery_tag = Tag}),
             consume(Channel, Mod, State2)
     end.
+
+
+%% @doc receive_msg encapsulate rabbitmq specific matching
+-spec receive_msg(Msg::term()) -> {rabbit_msg, ok} |
+                                  {rabbit_msg, cancel} |
+                                  {rabbit_msg, {msg, Content::binary(), Tag::binary()}} |
+                                  {other, Msg::term()}.
+receive_msg(#'basic.consume_ok'{}) ->
+    {rabbit_msg, ok};
+receive_msg(#'basic.cancel_ok'{}) ->
+    {rabbit_msg, cancel};
+receive_msg({#'basic.deliver'{delivery_tag = Tag}, #'amqp_msg'{payload=Content}}) ->
+    {rabbit_msg, {msg, Content, Tag}};
+receive_msg(Other) ->
+    {other, Other}.
+
+-spec ack_msg(Channel::pid(), Tag::binary()) -> ok.
+ack_msg(Channel, Tag) ->
+    amqp_channel:cast(Channel, #'basic.ack'{delivery_tag = Tag}).
+
