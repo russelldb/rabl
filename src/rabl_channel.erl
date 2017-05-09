@@ -29,7 +29,8 @@ get() ->
 %% @see rabl_util:setup_rabl/0
 -spec start() -> {ok, pid()} | {error, Reason::term()}.
 start() ->
-    Conn = rabl:connect(),
+    Host = application:get_env(rabl, rabbit_host),
+    Conn = rabl:connect(Host),
     Channel = rabl:open_channel(Conn),
     ok = join(Channel),
     {ok, Channel}.

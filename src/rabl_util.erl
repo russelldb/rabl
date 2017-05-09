@@ -8,62 +8,28 @@
 
 -compile(export_all).
 
-%% QAD set up, returns the name of the queue that the _other_
-%% cluster(s) should subscribe to to get replicated objects
--spec setup_rabl() -> Queue::binary().
-setup_rabl() ->
-    Cluster = app_helper:get_env(riak_core, cluster_name),
-    ClusterBin = term_to_binary(Cluster),
-    Connection = rabl:connect(),
-    lager:debug("connected~n"),
-    Channel = rabl:open_channel(Connection),
-    lager:debug("got channel~n"),
-    Queue = rabl:make_queue(Channel, ClusterBin),
-    lager:debug("made queue~n"),
-    Exchange = rabl:make_exchange(Channel, ClusterBin),
-    lager:debug("made exchange~n"),
-    _RoutingKey = rabl:bind(Channel, Exchange, Queue, ClusterBin),
-    lager:debug("queue, exchange, routing key set up ~p~n", [ClusterBin]),
-    rabl_channel:add(Channel),
-    Queue.
-
 %% QAD add hook
 -spec add_hook(Bucket::binary() | {binary(), binary()}) -> ok.
 add_hook(Bucket) ->
-    {ok, C} = riak:local_client(),
-    C:set_bucket(Bucket,[{postcommit, [{struct,[{<<"mod">>,<<"rabl_hook">>},{<<"fun">>, <<"rablicate">>}]}]}]),
-    riak_core_bucket:get_bucket(Bucket).
+    {ok, C} = rabl_riak_client:new(),
+    rabl_riak_client:set_bucket(C, Bucket,[{postcommit, [{struct,[{<<"mod">>,<<"rabl_hook">>},{<<"fun">>, <<"rablicate">>}]}]}]).
 
 %% convenience local put
 -spec put(Bucket::binary() | {binary(), binary()},
           Key::binary(), Val::binary()) -> ok.
 put(Bucket, Key, Value) ->
-    {ok, C} = riak:local_client(),
+    {ok, C} = rabl_riak_client:new(),
+    %% @TODO: dependancy on riak_kv/riak_object
     Obj = riak_object:new(Bucket, Key, Value),
-    ok = C:put(Obj, []),
+    ok = rabl_riak_client:put(C, Obj, []),
     ok.
-
-%% close all channels in PG (what about connection(s)?)
--spec teardown_rabl() -> ok.
-teardown_rabl() ->
-    NodeBin = atom_to_binary(node(), utf8),
-    Pids = rabl_channel:get_all(),
-    lists:foreach(fun(Channel) ->
-                          ok = rabl:unbind(Channel, NodeBin, NodeBin, NodeBin),
-                          ok = rabl:del_exchange(Channel, NodeBin),
-                          ok = rabl:del_queue(Channel, NodeBin),
-                          ok = rabl_channel:close(Channel),
-                          %% TODO erm, how to disconnect??)
-                          ok
-                  end,
-                  Pids).
 
 %% the repl receiver subscription
 %% TODO what about unsubscribing/tag state
 -spec subscribe(pid()) -> binary().
 subscribe(Queue) ->
     {ok, Channel} = rabl_channel:get(),
-    {ok, Client} = riak:local_client(),
+    {ok, Client} = rabl_riak_client:new(),
     rabl:subscribe(Channel, Queue, ?MODULE, Client).
 
 -spec unsubscribe(binary()) -> ok.
@@ -71,12 +37,12 @@ unsubscribe(Tag) ->
     {ok, Channel} = rabl_channel:get(),
     rabl:unsubscribe(Channel, Tag).
 
-%% QAD consumer, uses local client, eh!
+%% Consumer fun NOTE: @TODO what about depending on riak_kv here for
+%% riak_object? Maybe better to use HTTP/PB/public API
 -spec on_message(Content::binary(), State::term()) -> State::term().
 on_message(Message, Client) ->
     {{B, K}, BinObj} = binary_to_term(Message),
     Obj = riak_object:from_binary(B, K, BinObj),
     lager:debug("putting ~p ~p~n", [B, K]),
-    ok = Client:put(Obj, [asis, disable_hooks]),
+    ok = rabl_riak_client:put(Client, Obj, [asis, disable_hooks]),
     Client.
-

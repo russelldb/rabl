@@ -15,11 +15,10 @@
 %% @see rabl_util:add_hook/1
 rablicate(Object) ->
     lager:debug("hook called~n"),
-    Cluster = app_helper:get_env(riak_core, cluster_name),
-    ClusterBin = term_to_binary(Cluster),
+    Cluster = application:get_env(rabl, cluster_name),
     {ok, Channel} = rabl:get_channel(),
     BK = {riak_object:bucket(Object), riak_object:key(Object)},
     BinObj = riak_object:to_binary(v1, Object),
     Msg = term_to_binary({BK, BinObj}),
     lager:debug("rablicating ~p~n", [BK]),
-    rabl:publish(Channel, ClusterBin, ClusterBin, Msg).
+    rabl:publish(Channel, Cluster, Cluster, Msg).

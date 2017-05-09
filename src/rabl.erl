@@ -16,6 +16,11 @@ connect() ->
     {ok, Connection} = amqp_connection:start(#amqp_params_network{}),
     Connection.
 
+-spec connect(Host::string()) -> pid().
+connect(Host) ->
+    {ok, Connection} = amqp_connection:start(#amqp_params_network{host=Host}),
+    Connection.
+
 -spec disconnect(pid()) -> ok.
 disconnect(Connection) when is_pid(Connection) ->
     amqp_connection:close(Connection).
