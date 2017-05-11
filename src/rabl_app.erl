@@ -20,8 +20,10 @@ start() ->
     application:start(rabl).
 
 start(_StartType, _StartArgs) ->
-    lager:info("rabl started"),
-    rabl_sup:start_link().
+    lager:info("rabl starting"),
+    %% @TODO should be in app defaults? or a macro?
+    {ok, ConsumerCnt} = application:get_env(rabl, consumer_count, {ok, 10}),
+    rabl_sup:start_link(ConsumerCnt).
 
 %%--------------------------------------------------------------------
 stop(_State) ->

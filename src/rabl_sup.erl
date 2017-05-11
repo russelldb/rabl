@@ -8,7 +8,7 @@
 -behaviour(supervisor).
 
 %% API
--export([start_link/0]).
+-export([start_link/1]).
 
 %% Supervisor callbacks
 -export([init/1]).
@@ -19,20 +19,24 @@
 %% API functions
 %%====================================================================
 
-start_link() ->
-    supervisor:start_link({local, ?SERVER}, ?MODULE, []).
+start_link(ConsumerCnt) when is_integer(ConsumerCnt)->
+    supervisor:start_link({local, ?SERVER}, ?MODULE, [ConsumerCnt]).
 
 %%====================================================================
 %% Supervisor callbacks
 %%====================================================================
 
 %% Child :: {Id,StartFunc,Restart,Shutdown,Type,Modules}
-init([]) ->
+init([ConsumerCnt]) ->
     SupFlags = {one_for_one, 1, 5},
-    ChildSpec = {rabl_consumer, {rabl_consumer, start_link, []},
-                 permanent, 5000, worker, [rabl_consumer]},
-    {ok, {SupFlags, [ChildSpec]} }.
+    ChildSpecs = [{consumer_name(N), {rabl_consumer, start_link, []},
+                 permanent, 5000, worker, [rabl_consumer]}
+                  || N <- lists:seq(1, ConsumerCnt)],
+    {ok, {SupFlags, ChildSpecs} }.
 
 %%====================================================================
 %% Internal functions
 %%====================================================================
+%% @private give the consumers a descriptive name
+consumer_name(I) when is_integer(I) ->
+    list_to_atom("rabl_consumer_" ++ integer_to_list(I)).
