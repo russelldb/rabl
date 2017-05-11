@@ -80,8 +80,16 @@ get_action(ParsedArgs) ->
     end.
 
 perform_action(start, _ParsedArgs, RiakNode) ->
-    ok = rpc:call(RiakNode, rabl_app, start, []),
-    io:format("rabl started on ~p~n", [RiakNode]);
+    case rpc:call(RiakNode, rabl_app, start, []) of
+        ok ->
+            io:format("rabl started on ~p~n", [RiakNode]);
+        {error, {already_started,rabl}} ->
+            io:format("rabl already started on ~p~n", [RiakNode]);
+        {error, Reason} ->
+            io:format("rabl maybe failed to start on ~p with error ~p~n", [RiakNode, Reason]);
+        {badrpc, Reason} ->
+            io:format("attmept to start rabl on ~p failed with badrpc error ~p~n", [RiakNode, Reason])
+    end;
 perform_action('add-hook', ParsedArgs, RiakNode) ->
     Bucket = proplists:get_value(bucket, ParsedArgs),
     ok = rpc:call(RiakNode, rabl_util, add_hook, [Bucket]),

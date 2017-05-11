@@ -118,6 +118,8 @@ handle_info(Info, State) ->
                     %% @TODO something about channel/ack failures
                     ok = rabl:ack_msg(Channel, Tag);
                 Error ->
+                    %% @TODO you can NACK here (consider client time
+                    %% outs here) SLEEP if overload?
                     lager:error("Failed to replicate ~p ~p with Error ~p", [B, K, Error])
             end;
         _other -> ok
