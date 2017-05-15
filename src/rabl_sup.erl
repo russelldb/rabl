@@ -29,10 +29,12 @@ start_link(ConsumerCnt) when is_integer(ConsumerCnt)->
 %% Child :: {Id,StartFunc,Restart,Shutdown,Type,Modules}
 init([ConsumerCnt]) ->
     SupFlags = {one_for_one, 1, 5},
+    RablStat = {rabl_stat, {rabl_stat, start_link, []},
+                 permanent, 5000, worker, [rabl_stat]},
     ChildSpecs = [{consumer_name(N), {rabl_consumer, start_link, []},
                  permanent, 5000, worker, [rabl_consumer]}
                   || N <- lists:seq(1, ConsumerCnt)],
-    {ok, {SupFlags, ChildSpecs} }.
+    {ok, {SupFlags, ChildSpecs ++ [RablStat]} }.
 
 %%====================================================================
 %% Internal functions

@@ -110,7 +110,10 @@ handle_info(Info, State) ->
         {rabbit_msg, cancel} -> shutdown;
         {rabbit_msg, {msg, Message, Tag}} ->
             #state{client=Client, channel=Channel} = State,
-            {{B, K}, BinObj} = binary_to_term(Message),
+            Time = os:timestamp(),
+            {TimingTag, {B, K}=BK, BinObj} = binary_to_term(Message),
+            rabl_stat:consume(BK, TimingTag, Time),
+
             Obj = riak_object:from_binary(B, K, BinObj),
             lager:info("rabl putting ~p ~p~n", [B, K]),
             case rabl_riak_client:put(Client, Obj, [asis, disable_hooks]) of

@@ -75,7 +75,7 @@ get_action(ParsedArgs) ->
         undefined ->
             io:format("Please specify an 'action' [start | add-hook]~n"),
             usage();
-        Action when Action == start; Action == 'add-hook'; Action == consumers ->
+        Action when Action == start; Action == 'add-hook'; Action == consumers; Action == 'setup-local' ->
             {ok, Action}
     end.
 
@@ -101,7 +101,10 @@ perform_action('consumers', _ParsedArgs, RiakNode) ->
             io:format("rabl consumers:~n ~p~n", [Children]);
         Error ->
             io:format("Failed to get consumer list with ~p~n", [Error])
-end.
+    end;
+perform_action('setup-local', _ParsedArgs, RiakNode) ->
+    Res = rpc:call(RiakNode, rabl_util, setup_local_smoke_test, []),
+    io:format("~p~n", [Res]).
 
 start_node(Conf) ->
     CtlNode = proplists:get_value(rablctl_nodename, Conf, 'rablctl@127.0.0.1'),
