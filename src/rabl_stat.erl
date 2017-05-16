@@ -108,11 +108,11 @@ handle_call(_Request, _From, State) ->
 %%--------------------------------------------------------------------
 handle_cast({publish, BK, Tag, Timestamp}, State) ->
     #state{publish_log=PubLog} = State,
-    ok = io:fwrite(PubLog, "~p ~p ~p~n", [BK, Tag, Timestamp]),
+    ok = write_logline(PubLog, BK, Tag, Timestamp),
     {noreply, State};
 handle_cast({consume, BK, Tag, Timestamp}, State) ->
     #state{consume_log=ConLog} = State,
-    ok = io:fwrite(ConLog, "~p ~p ~p~n", [BK, Tag, Timestamp]),
+    ok = write_logline(ConLog, BK, Tag, Timestamp),
     {noreply, State}.
 
 %%--------------------------------------------------------------------
@@ -157,5 +157,21 @@ code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
 %%%===================================================================
-%%% Internal functions
-%%%===================================================================
+%% % Internal functions
+%% %===================================================================
+%% @private every library, even every module, has to have one. Should
+%% be in OTP stdlib, right?
+-spec ts_to_ms(erlang:timestamp()) -> integer().
+ts_to_ms({Mega, Sec, Micro}) ->
+    (Mega*1000000+Sec)*1000000+Micro.
+
+%% @private why write it twice? Normalises log lines by hashing unique
+%% information into a tag, and turning erlang:timestamp() into an
+%% posix millisecond stamp.
+-spec write_logline(IODevice::any(), any(), any(), erlang:timestamp()) -> ok.
+write_logline(FD, BK, Tag, Timestamp) ->
+    LogTag0 = term_to_binary({BK, Tag}),
+    LogTag = binary:decode_unsigned(crypto:hash(sha, LogTag0)),
+    Time = ts_to_ms(Timestamp),
+    ok = io:fwrite(FD, "~w ~w~n", [LogTag, Time]),
+    ok.
