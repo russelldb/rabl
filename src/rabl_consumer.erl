@@ -57,7 +57,7 @@ start_link() ->
 %%--------------------------------------------------------------------
 init([]) ->
     Pid = self(),
-    {ok, Channel} = rabl:get_channel(),
+    {ok, Channel} = rabl_channel:start(),
     {ok, Client} = rabl_riak_client:new(),
     {ok, SinkQueue} = application:get_env(rabl, sink_queue),
     Tag = rabl:subscribe(Channel, SinkQueue, Pid),
@@ -115,7 +115,7 @@ handle_info(Info, State) ->
             rabl_stat:consume(BK, TimingTag, Time),
 
             Obj = riak_object:from_binary(B, K, BinObj),
-            lager:info("rabl putting ~p ~p~n", [B, K]),
+            lager:debug("rabl putting ~p ~p~n", [B, K]),
             case rabl_riak_client:put(Client, Obj, [asis, disable_hooks]) of
                 ok ->
                     %% @TODO something about channel/ack failures
