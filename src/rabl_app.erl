@@ -16,7 +16,7 @@
 %%====================================================================
 
 start() ->
-    amqp_client:start(),
+    ok = amqp_client:start(),
     application:start(rabl).
 
 start(_StartType, _StartArgs) ->

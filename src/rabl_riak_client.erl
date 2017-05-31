@@ -15,7 +15,7 @@
 
 %% create a new client. Uses app config to connect. Returns `{ok,
 %% Client}' where C is an opaque term to be used for other functions.
--spec new() -> client().
+-spec new() -> {ok, client()}.
 new() ->
     {ok, C} = riak:local_client(),
     {ok, C}.

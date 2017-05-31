@@ -17,6 +17,7 @@
 %%====================================================================
 
 %% escript Entry point
+-spec main(list()) -> no_return().
 main(Args) ->
     {ParsedArgs, ExtraArgs} = case getopt:parse(cli_opts(), Args) of
                                   {ok, {P, E}} -> {P, E};
@@ -50,6 +51,7 @@ cli_opts() ->
      {help,         $h,         "help",         undefined,                "help / usage"}
     ].
 
+-spec usage() -> no_return().
 usage() ->
     getopt:usage(cli_opts(), "rablctl"),
     halt(0).
