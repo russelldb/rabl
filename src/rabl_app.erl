@@ -24,7 +24,8 @@ start(_StartType, _StartArgs) ->
     %% @TODO should be in app defaults? or a macro?
     ConsumerCnt = application:get_env(rabl, consumer_count, 10),
     SupStart = rabl_sup:start_link(ConsumerCnt),
-    _Conns = [rabl_channel:start() || _N <- lists:seq(1, 100)],
+    Producers = application:get_env(rabl, producer_count, 10),
+    _Conns = [rabl_channel:start() || _N <- lists:seq(1, Producers)],
     SupStart.
 
 %%--------------------------------------------------------------------
