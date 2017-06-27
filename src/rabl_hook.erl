@@ -14,9 +14,9 @@
 -spec rablicate(riak_object:riak_object()) -> ok |
                                               {fail, Reason::term()}.
 rablicate(Object) ->
-    lager:debug("hook called~n"),
+    lager:debug("rabl hook called~n"),
     {ok, Cluster} = application:get_env(rabl, cluster_name),
-    {ok, Channel} = rabl:get_channel(),
+    {ok, Channel} = rabl_producer:get_channel(),
     BK = {riak_object:bucket(Object), riak_object:key(Object)},
     BinObj = riak_object:to_binary(v1, Object),
     Time = os:timestamp(),

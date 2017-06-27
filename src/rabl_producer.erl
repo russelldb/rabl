@@ -2,17 +2,22 @@
 %%% @author Russell Brown <russell@wombat.me>
 %%% @copyright (C) 2017, Russell Brown
 %%% @doc
-%%% A very basic rabbitmq consumer that puts messages as objects into
-%%% riak
+
+%%% bound the number of channels created for rabl_hooks, this is
+%%% pretty primative, and serial, probably need something better
+%%% (pools/sidejob/cxy_fount etc) ALSO @TODO how to handle no produce
+%%% connections, just crash? @TODO robustness, failure to open
+%%% connection isn't a disaster.
+
 %%% @end
-%%% Created :  9 May 2017 by Russell Brown <russell@wombat.me>
+%%% Created : 12 Jun 2017 by Russell Brown <russell@wombat.me>
 %%%-------------------------------------------------------------------
--module(rabl_consumer).
+-module(rabl_producer).
 
 -behaviour(gen_server).
 
 %% API
--export([start_link/0]).
+-export([start_link/0, get_channel/0]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -20,11 +25,7 @@
 
 -define(SERVER, ?MODULE).
 
--record(state, {
-          channel :: pid(), %% rabbitmq channel
-          client :: rabl_riak_client:client(),
-          subscription_tag :: binary() %% from rabl:subscribe/3
-         }).
+-record(state, {channels=[], counter=1}).
 
 %%%===================================================================
 %%% API
@@ -38,7 +39,17 @@
 %% @end
 %%--------------------------------------------------------------------
 start_link() ->
-    gen_server:start_link(?MODULE, [], []).
+    gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Gets a channel to send a message on
+%%
+%% @end
+%%--------------------------------------------------------------------
+-spec get_channel() -> {ok, pid()} | {error, Reason::term()}.
+get_channel() ->
+    gen_server:call({local, ?SERVER}, get_channel, 5000).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -56,12 +67,12 @@ start_link() ->
 %% @end
 %%--------------------------------------------------------------------
 init([]) ->
-    Pid = self(),
-    {ok, Channel} = rabl_channel:start(),
-    {ok, Client} = rabl_riak_client:new(),
-    {ok, SinkQueue} = application:get_env(rabl, sink_queue),
-    Tag = rabl:subscribe(Channel, SinkQueue, Pid),
-    {ok, #state{channel=Channel, client=Client, subscription_tag=Tag}}.
+    %% we don't want to crash when a connection closes, we just want
+    %% to know, and open another
+    process_flag(trap_exit, true),
+    Producers = application:get_env(rabl, producer_count, 10),
+    Channels= [start_link_local_conn() || _N <- lists:seq(1, Producers)],
+    {ok, #state{channels=Channels}}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -77,9 +88,11 @@ init([]) ->
 %%                                   {stop, Reason, State}
 %% @end
 %%--------------------------------------------------------------------
-handle_call(_Request, _From, State) ->
-    Reply = ok,
-    {reply, Reply, State}.
+handle_call(get_channel, _From, State) ->
+    #state{channels=Channels, counter=Cnt} = State,
+    Channel = lists:nth(Cnt, Channels),
+    NewCount = increment_counter(Cnt, Channels),
+    {reply, {ok, Channel}, State#state{counter=NewCount}}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -104,30 +117,19 @@ handle_cast(_Msg, State) ->
 %%                                   {stop, Reason, State}
 %% @end
 %%--------------------------------------------------------------------
-handle_info(Info, State) ->
-    case rabl:receive_msg(Info) of
-        {rabbit_msg, ok} -> ok;
-        {rabbit_msg, cancel} -> shutdown;
-        {rabbit_msg, {msg, Message, Tag}} ->
-            #state{client=Client, channel=Channel} = State,
-            Time = os:timestamp(),
-            {TimingTag, {B, K}=BK, BinObj} = binary_to_term(Message),
-            rabl_stat:consume(BK, TimingTag, Time),
-
-            Obj = riak_object:from_binary(B, K, BinObj),
-            lager:debug("rabl putting ~p ~p~n", [B, K]),
-            case rabl_riak_client:put(Client, Obj, [asis, disable_hooks]) of
-                ok ->
-                    %% @TODO something about channel/ack failures
-                    ok = rabl:ack_msg(Channel, Tag);
-                Error ->
-                    %% @TODO you can NACK here (consider client time
-                    %% outs here) SLEEP if overload?
-                    lager:error("Failed to replicate ~p ~p with Error ~p", [B, K, Error])
-            end;
-        _other -> ok
-    end,
+handle_info({'EXIT', Channel, Reason} , State) ->
+    %% remove `Channel' from state, reopen a new one, log a warning,
+    %% (change the counter?)  @TODO what if all channels close and we
+    %% cannot re-open another? Should we crash???
+    lager:error("Channel exited with reason ~p~n", [Reason]),
+    #state{channels=Channels} = State,
+    Channels2 = lists:delete(Channel, Channels),
+    NewChannel = start_link_local_conn(),
+    {noreply, State#state{channels= [NewChannel | Channels2]}};
+handle_info(Other, State) ->
+    lager:warning("Unexpected Info message ~p~n", [Other]),
     {noreply, State}.
+
 
 %%--------------------------------------------------------------------
 %% @private
@@ -155,5 +157,18 @@ code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
 %%%===================================================================
-%%% Internal functions
-%%%===================================================================
+%% % Internal functions
+%% %===================================================================
+%% @private create a connection to the local rabbitmq, and link to it
+-spec start_link_local_conn() -> [pid()].
+start_link_local_conn() ->
+    Channel = rabl_channel:start_local(),
+    true = link(Channel),
+    Channel.
+
+%% @private increment the round robin counter
+-spec increment_counter(pos_integer(), list(pid())) -> pos_integer().
+increment_counter(Cnt, Channels) when Cnt >= length(Channels) ->
+    1;
+increment_counter(Cnt, _Channels) ->
+    Cnt+1.

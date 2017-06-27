@@ -11,10 +11,8 @@
 
 -include_lib("amqp_client/include/amqp_client.hrl").
 
--spec connect() -> pid().
-connect() ->
-    {ok, Connection} = amqp_connection:start(#amqp_params_network{}),
-    Connection.
+-spec connect() -> pid().  connect() -> {ok, Connection} =
+amqp_connection:start(#amqp_params_network{}), Connection.
 
 -spec connect(Host::string()) -> pid().
 connect(Host) ->

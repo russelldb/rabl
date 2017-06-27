@@ -35,6 +35,13 @@ start() ->
     ok = join(Channel),
     {ok, Channel}.
 
+%% @doc Start a channel connected to the local rabbitmq server
+-spec start_local() -> {ok, pid()} | {error, Reason::term()}.
+start_local() ->
+    {ok, Host} = application:get_env(rabl, producer_host),
+    Conn = rabl:connect(Host),
+    rabl:open_channel(Conn).
+
 %% @doc add given `Channel' to register
 -spec add(pid()) -> ok.
 add(Channel) when is_pid(Channel) ->
