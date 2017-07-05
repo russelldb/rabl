@@ -11,7 +11,13 @@
 -behaviour(gen_server).
 
 %% API
--export([start_link/0, publish/3, consume/3]).
+-export([
+         consume/3,
+         consume_fail/4,
+         publish/3,
+         publish_fail/4,
+         start_link/0
+        ]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -54,6 +60,26 @@ publish(BK, Tag, Timestamp) ->
 -spec consume(bucket_key(), timing_tag(), erlang:timestamp()) -> ok.
 consume(BK, Tag, Timestamp) ->
     gen_server:cast(?MODULE, {consume, BK, Tag, Timestamp}).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Called when a hook fails to publish a riak object
+%%%% @end
+%%--------------------------------------------------------------------
+-spec publish_fail(bucket_key(), timing_tag(), erlang:timestamp(), Reason::term())
+                  -> ok.
+publish_fail(BK, Tag, Timestamp, Reason) ->
+    gen_server:cast(?MODULE, {publish_fail, BK, Tag, Timestamp, Reason}).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Called when a consumer recieves an riak_object, and then nacks it.
+%%%% @end
+%%--------------------------------------------------------------------
+-spec consume_fail(bucket_key(), timing_tag(), erlang:timestamp(), Reason::term())
+                  -> ok.
+consume_fail(BK, Tag, Timestamp, Reason) ->
+    gen_server:cast(?MODULE, {consume_fail, BK, Tag, Timestamp, Reason}).
 
 %%%===================================================================
 %%% gen_server callbacks

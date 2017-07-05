@@ -384,7 +384,7 @@ fail_on_max_channel_open_errors() ->
     Pid = self(),
     meck:new(rabl_amqp, [passthrough]),
     meck:expect(rabl_amqp, connection_start, fun(_) ->
-                                                     {ok, mock_rabl_con(Pid)}
+                                                     {ok, rabl_mock:mock_rabl_con(Pid)}
                                              end),
     meck:expect(rabl_amqp, connection_close, ['_'], meck:val(ok)),
     meck:expect(rabl_amqp, channel_open, ['_'], meck:val({error, channel_open_error})),
@@ -411,11 +411,11 @@ reopen_closed_connections() ->
     meck:new(rabl_amqp, [passthrough]),
     Pid = self(),
     meck:expect(rabl_amqp, connection_start, fun(_) ->
-                                                     {ok, mock_rabl_con(Pid)}
+                                                     {ok, rabl_mock:mock_rabl_con(Pid)}
                                              end),
     meck:expect(rabl_amqp, connection_close, ['_'], meck:val(ok)),
     meck:expect(rabl_amqp, channel_open, fun(_) ->
-                                                 {ok, mock_rabl_chan(Pid)}
+                                                 {ok, rabl_mock:mock_rabl_chan(Pid)}
                                          end),
 
     meck:expect(rabl_amqp, set_prefetch_count, ['_', '_'], meck:val(ok)),
@@ -428,8 +428,8 @@ reopen_closed_connections() ->
     ?assertMatch(ok, meck:wait(1, rabl_amqp, connection_start, ['_'], 1000)),
     ?assertMatch(ok, meck:wait(1, rabl_amqp, channel_open, ['_'], 1000)),
 
-    CurrentCon = receive_connection(Pid),
-    CurrentChan = receive_channel(Pid),
+    CurrentCon = rabl_mock:receive_connection(Pid),
+    CurrentChan = rabl_mock:receive_channel(Pid),
 
     meck:reset(rabl_amqp),
 
@@ -438,8 +438,8 @@ reopen_closed_connections() ->
     ?assertMatch(ok, meck:wait(1, rabl_amqp, connection_start, ['_'], 1000)),
     ?assertMatch(ok, meck:wait(1, rabl_amqp, channel_open, ['_'], 1000)),
 
-    NewCon = receive_connection(Pid),
-    NewChan = receive_channel(Pid),
+    NewCon = rabl_mock:receive_connection(Pid),
+    NewChan = rabl_mock:receive_channel(Pid),
 
     ?assertNotEqual(CurrentCon, NewCon),
     ?assertNotEqual(CurrentChan, NewChan),
@@ -461,11 +461,11 @@ reopen_closed_channels() ->
     meck:new(rabl_amqp, [passthrough]),
     Pid = self(),
     meck:expect(rabl_amqp, connection_start, fun(_) ->
-                                                     {ok, mock_rabl_con(Pid)}
+                                                     {ok, rabl_mock:mock_rabl_con(Pid)}
                                              end),
 
     meck:expect(rabl_amqp, channel_open, fun(_) ->
-                                                 {ok, mock_rabl_chan(Pid)}
+                                                 {ok, rabl_mock:mock_rabl_chan(Pid)}
                                          end),
     meck:expect(rabl_amqp, set_prefetch_count, ['_', '_'], meck:val(ok)),
     meck:expect(rabl_amqp, subscribe, ['_', '_', '_'], meck:val({ok, <<"subscription">>})),
@@ -476,7 +476,7 @@ reopen_closed_channels() ->
     ?assertMatch(ok, meck:wait(1, rabl_amqp, connection_start, ['_'], 1000)),
     ?assertMatch(ok, meck:wait(1, rabl_amqp, channel_open, ['_'], 1000)),
 
-    CurrentChan = receive_channel(Pid),
+    CurrentChan = rabl_mock:receive_channel(Pid),
 
     meck:reset(rabl_amqp),
 
@@ -484,7 +484,7 @@ reopen_closed_channels() ->
 
     ?assertMatch(ok, meck:wait(1, rabl_amqp, channel_open, ['_'], 1000)),
 
-    NewChan = receive_channel(Pid),
+    NewChan = rabl_mock:receive_channel(Pid),
 
     ?assertNotEqual(CurrentChan, NewChan),
 
@@ -499,11 +499,11 @@ reopen_closed_channels_and_connections() ->
     Pid = self(),
 
     meck:expect(rabl_amqp, connection_start, fun(_) ->
-                                                     {ok, mock_rabl_con(Pid)}
+                                                     {ok, rabl_mock:mock_rabl_con(Pid)}
                                              end),
     meck:expect(rabl_amqp, connection_close, ['_'], meck:val(ok)),
     meck:expect(rabl_amqp, channel_open, fun(_) ->
-                                                 {ok, mock_rabl_chan(Pid)}
+                                                 {ok, rabl_mock:mock_rabl_chan(Pid)}
                                          end),
     meck:expect(rabl_amqp, set_prefetch_count, ['_', '_'], meck:val(ok)),
     meck:expect(rabl_amqp, subscribe, ['_', '_', '_'], meck:val({ok, <<"subscription">>})),
@@ -514,8 +514,8 @@ reopen_closed_channels_and_connections() ->
     ?assertMatch(ok, meck:wait(1, rabl_amqp, connection_start, ['_'], 1000)),
     ?assertMatch(ok, meck:wait(1, rabl_amqp, channel_open, ['_'], 1000)),
 
-    CurrentCon = receive_connection(Pid),
-    CurrentChan = receive_channel(Pid),
+    CurrentCon = rabl_mock:receive_connection(Pid),
+    CurrentChan = rabl_mock:receive_channel(Pid),
 
     meck:reset(rabl_amqp),
 
@@ -523,13 +523,13 @@ reopen_closed_channels_and_connections() ->
     meck:expect(rabl_amqp, channel_open, fun(Con) when Con == CurrentCon ->
                                                  {error, nope};
                                             (_) ->
-                                                 {ok, mock_rabl_chan(Pid)}
+                                                 {ok, rabl_mock:mock_rabl_chan(Pid)}
                                          end),
 
     true = erlang:exit(CurrentChan, boom),
 
-    NewCon = receive_connection(Pid),
-    NewChan = receive_channel(Pid),
+    NewCon = rabl_mock:receive_connection(Pid),
+    NewChan = rabl_mock:receive_channel(Pid),
 
     ?assertMatch(ok, meck:wait(1, rabl_amqp, channel_open, [CurrentCon], 1000)),
     ?assertMatch(ok, meck:wait(1, rabl_amqp, connection_start, ['_'], 1000)),
@@ -549,11 +549,11 @@ fail_on_max_subscribe_errors() ->
     meck:new(rabl_amqp, [passthrough]),
     Pid = self(),
     meck:expect(rabl_amqp, connection_start, fun(_) ->
-                                                     {ok, mock_rabl_con(Pid)}
+                                                     {ok, rabl_mock:mock_rabl_con(Pid)}
                                              end),
     meck:expect(rabl_amqp, connection_close, ['_'], meck:val(ok)),
     meck:expect(rabl_amqp, channel_open, fun(_) ->
-                                                 {ok, mock_rabl_chan(Pid)}
+                                                 {ok, rabl_mock:mock_rabl_chan(Pid)}
                                          end),
     meck:expect(rabl_amqp, channel_close, ['_'], meck:val(ok)),
     meck:expect(rabl_amqp, set_prefetch_count, ['_', '_'], meck:val(ok)),
@@ -578,11 +578,11 @@ subscribe_noproc_reconnects() ->
     meck:new(rabl_amqp, [passthrough]),
     Pid = self(),
     meck:expect(rabl_amqp, connection_start, fun(_) ->
-                                                     {ok, mock_rabl_con(Pid)}
+                                                     {ok, rabl_mock:mock_rabl_con(Pid)}
                                              end),
     meck:expect(rabl_amqp, connection_close, ['_'], meck:val(ok)),
     meck:expect(rabl_amqp, channel_open, fun(_) ->
-                                                 {ok, mock_rabl_chan(Pid)}
+                                                 {ok, rabl_mock:mock_rabl_chan(Pid)}
                                          end),
     meck:expect(rabl_amqp, channel_close, ['_'], meck:val(ok)),
     meck:expect(rabl_amqp, set_prefetch_count, ['_', '_'], meck:val(ok)),
@@ -638,7 +638,7 @@ handles_rabbit_messages() ->
     {ok, Consumer} = start_link(?AMQPURI),
     unlink(Consumer),
     Mon = monitor(process, Consumer),
-    Channel = receive_channel(self()),
+    Channel = rabl_mock:receive_channel(self()),
 
     %% call expect later so we can use the actual channel in arg_spec
     meck:expect(rabl_amqp, ack_msg, [Channel, Tag], ok),
@@ -665,25 +665,6 @@ wait_for_message(Msg) ->
             wait_for_message(Msg)
     end.
 
-%% the mock connection is a process (just like the real connection)
-%% and the meck expect fun sends the pid to the test process. We block
-%% to receive it.
-receive_connection(SelfPid) ->
-    receive
-        {SelfPid, {opened_connection, ConPid}} ->
-            ConPid
-    after 5000 -> exit({timeout, connection})
-    end.
-
-%% the mock channel is a process, and the meck expect function sends
-%% the pid to the test process
-receive_channel(SelfPid) ->
-    receive
-        {SelfPid, {opened_channel, ChanPid}} ->
-            ChanPid
-    after 5000 -> exit({timeout, channel})
-    end.
-
 %% those application variables that loading the app/config would
 %% populate
 rabl_env_setup() ->
@@ -702,11 +683,11 @@ good_rabbit_mocks() ->
     Pid = self(),
     meck:new(rabl_amqp, [passthrough]),
     meck:expect(rabl_amqp, connection_start, fun(_) ->
-                                                     {ok, mock_rabl_con(Pid)}
+                                                     {ok, rabl_mock:mock_rabl_con(Pid)}
                                              end),
     meck:expect(rabl_amqp, connection_close, ['_'], meck:val(ok)),
     meck:expect(rabl_amqp, channel_open, fun(_) ->
-                                                 {ok, mock_rabl_chan(Pid)}
+                                                 {ok, rabl_mock:mock_rabl_chan(Pid)}
                                          end),
     meck:expect(rabl_amqp, channel_close, ['_'], meck:val(ok)),
     meck:expect(rabl_amqp, set_prefetch_count, ['_', '_'], meck:val(ok)),
@@ -722,21 +703,5 @@ flush() ->
 unmock_riak() ->
     flush(),
     meck:unload(rabl_riak).
-
-mock_rabl_con(Caller) ->
-    Pid = spawn(fun mock_rabl_loop/0),
-    Caller ! {Caller, {opened_connection, Pid}},
-    Pid.
-
-mock_rabl_chan(Caller) ->
-    Pid = spawn(fun mock_rabl_loop/0),
-    Caller ! {Caller, {opened_channel, Pid}},
-    Pid.
-
-mock_rabl_loop() ->
-    receive
-        _Msg ->
-            mock_rabl_loop()
-    end.
 
 -endif.

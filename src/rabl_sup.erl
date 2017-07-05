@@ -30,11 +30,12 @@ start_link() ->
 init([]) ->
     SupFlags = {one_for_one, 1, 5},
     RablStat = {rabl_stat, {rabl_stat, start_link, []},
-                 transient, 5000, worker, [rabl_stat]},
-    RablProducer = {rabl_producer, {rabl_producer, start_link, []},
-                    permanent, 5000, worker, [rabl_producer]},
+                transient, 5000, worker, [rabl_stat]},
+    RablProducerSup = {rabl_producer_sup, {rabl_producer_sup, start_link, []},
+                       permanent, 5000, supervisor, [rabl_producer_sup]},
+
     ConsumerSpecs = consumer_specs(),
-    {ok, {SupFlags, ConsumerSpecs ++ [RablStat, RablProducer]}}.
+    {ok, {SupFlags, ConsumerSpecs ++ [RablStat, RablProducerSup]}}.
 
 %%====================================================================
 %% Internal functions

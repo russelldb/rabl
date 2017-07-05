@@ -96,3 +96,12 @@ nack_msg(Channel, Tag) when is_pid(Channel), is_binary(Tag) ->
     amqp_channel:cast(Channel, #'basic.nack'{delivery_tag = Tag,
                                              multiple=false,
                                              requeue=true}).
+
+-spec publish(pid(), binary(), binary(), binary()) -> ok.
+publish(Channel, Exchange, RoutingKey, Message) when is_pid(Channel),
+                                                     is_binary(Exchange),
+                                                     is_binary(RoutingKey),
+                                                     is_binary(Message) ->
+    Publish = #'basic.publish'{exchange = Exchange, routing_key = RoutingKey},
+    amqp_channel:cast(Channel, Publish, #amqp_msg{payload = Message}),
+    ok.
