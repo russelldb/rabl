@@ -43,12 +43,12 @@ init([]) ->
 
 consumer_specs() ->
     {ok, Consumers} = application:get_env(rabl, consumers),
-    ChildSpecs = lists:foldl(fun(Consumer, {ChildCnt, SpecsAcc}) ->
-                                     {ChildCnt2, Specs} = consumers(Consumer, ChildCnt),
-                                     {ChildCnt2, [Specs | SpecsAcc]}
-                             end,
-                             {0, []},
-                             Consumers),
+    {_Cnt, ChildSpecs} = lists:foldl(fun(Consumer, {ChildCnt, SpecsAcc}) ->
+                                             {ChildCnt2, Specs} = consumers(Consumer, ChildCnt),
+                                             {ChildCnt2, [Specs | SpecsAcc]}
+                                     end,
+                                     {0, []},
+                                     Consumers),
     lists:flatten(ChildSpecs).
 
 consumers({Cnt, URI}, NameCounter) ->

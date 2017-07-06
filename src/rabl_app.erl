@@ -16,7 +16,8 @@
 %%====================================================================
 
 start() ->
-    ok = amqp_client:start(),
+    start_if_not_started(lager),
+    start_if_not_started(amqp_client),
     application:start(rabl).
 
 start(_StartType, _StartArgs) ->
@@ -31,3 +32,12 @@ stop(_State) ->
 %%====================================================================
 %% Internal functions
 %%====================================================================
+start_if_not_started(App) ->
+    case App:start() of
+        {error,{already_started, App}} ->
+            ok;
+        ok ->
+            ok;
+        OtherError ->
+            OtherError
+    end.
