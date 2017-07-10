@@ -42,7 +42,7 @@
 -endif.
 
 %% API
--export([start_link/3, publish/1,
+-export([start_link/2, publish/1,
          load_producer/0, get_worker/0, producer_specs/0]).
 
 %% gen_fsm callbacks
@@ -54,16 +54,15 @@
 -define(SERVER, ?MODULE).
 
 -define(GENERATED_MOD, rabl_producer_gen).
-%% @TOD(rdb|refactor) move to common header file
--define(DEFAULT_PRODUCER_COUNT, 10).
 -define(DEFAULT_RECONN_DELAY_MILLIS, 50).
+-define(DEFAULT_MAX_RECONN_DELAY_MILLIS, 10000).
 
 -record(state, {
           channel,
           queue,
           amqp_params,
           reconnect_delay_millis=?DEFAULT_RECONN_DELAY_MILLIS,
-          start_time_millis=rabl_time:monotonic_time()
+          connection_attempt_counter = 0
          }).
 
 -ignore_xref({?GENERATED_MOD, workers, 0}).
@@ -85,13 +84,12 @@
 %% @end
 %%--------------------------------------------------------------------
 -spec start_link(Name::atom(),
-                 AMQPURI::string(),
-                 Opts::list()) ->
+                 AMQPURI::string()) ->
                         {ok, Pid::pid()}
                             | ignore
                             | {error, Error::term()}.
-start_link(Name, AMQPURI, Opts) ->
-    gen_fsm:start_link({local, Name}, ?MODULE, [AMQPURI, Opts], []).
+start_link(Name, AMQPURI) ->
+    gen_fsm:start_link({local, Name}, ?MODULE, [AMQPURI], []).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -154,56 +152,62 @@ get_worker(Scheduler) ->
 %%%===================================================================
 %%% gen_fsm callbacks
 %%%===================================================================
-
-init([AMQPURI, Opts]) ->
-    %% we want to crash when a connection closes, but we want to wait
-    %% a short delay first if it's a very shortlived
-    %% process. start_link_channel links to the connection process.
+init([AMQPURI]) ->
+    %% we don't want to crash if the connection does
     process_flag(trap_exit, true),
-    ReconnectDelay = proplists:get_value(reconnect_delay_millis,
-                                         Opts,
-                                         ?DEFAULT_RECONN_DELAY_MILLIS),
+    ReconnectDelay = default_reconnect_delay(),
+    {ok, Queue} = application:get_env(rabl, cluster_name),
     {ok, AMQPParams} = rabl_amqp:parse_uri(AMQPURI),
-    case start_link_channel(AMQPParams) of
-        {ok, Channel} ->
-            {ok, Queue} = application:get_env(rabl, cluster_name),
-            {ok, connected, #state{channel=Channel,
-                                   queue=Queue,
-                                   amqp_params=AMQPParams,
-                                   reconnect_delay_millis=ReconnectDelay}};
-        {error, Error} ->
-            lager:error("Connection error ~p for ~p", [Error, AMQPURI]),
-            erlang:send_after(ReconnectDelay, self(), connect_timeout),
-            {ok, disconnected, #state{reconnect_delay_millis=ReconnectDelay}}
+
+    State = #state{amqp_params=AMQPParams,
+                   queue=Queue,
+                   reconnect_delay_millis=ReconnectDelay},
+    case connect(State) of
+        {true, State2} ->
+            {ok, connected, State2};
+        {false, State2} ->
+            {ok, disconnected, State2}
     end.
 
+%% @private called by publish when the fsm in the connected state
 connected({publish, Msg}, _From,  State) ->
     #state{channel=Channel, queue=Queue} = State,
     Res = rabl_amqp:publish(Channel, Queue, Queue, Msg),
     {reply, Res, connected, State}.
 
-disconnected({publish, _Msg}, _From, State) ->
-    {reply, {error, no_connection}, disconnected, State}.
+%% @private called by publish when the fsm is disconnected
+disconnected({publish, Msg}, _From, State) ->
+    case connect(State) of
+        {true, State2} ->
+            #state{queue=Queue, channel=Channel} = State2,
+            Res = rabl_amqp:publish(Channel, Queue, Queue, Msg),
+            {reply, Res, connected, State};
+        {false, State2} ->
+            {reply, {error, no_connection}, disconnected, State2}
+    end.
 
+%% info callbacks
+%% Called when a the channel exits
 handle_info({'EXIT', Channel, Reason}, _AnyState, State=#state{channel=Channel}) ->
-    lager:error("Rabbit Connection Exited with reason ~p", [Reason]),
-    #state{start_time_millis=StartTime,
-           reconnect_delay_millis=ReconnectDelay} = State,
-    Now = rabl_time:monotonic_time(),
-    case (Now - StartTime) of
-        X when X >= ReconnectDelay ->
-            %% remove the (dead)channel from state so terminate
-            %% doesn't attempt to close it.
-            {stop, connection_error, State#state{channel=undefined}};
-        Y ->
-            %% wait a bit before crashing
-            lager:debug("connection died fast, waiting a bit ~p millis", [ReconnectDelay -Y]),
-            erlang:send_after(ReconnectDelay-Y, self(), connect_timeout),
-            {next_state, disconnected, State#state{channel=undefined}}
+    lager:error("Rabbit Connection Exited with reason ~p ~p", [Reason]),
+    case connect(State) of
+        {true, State2} ->
+            {next_state, connected, State2};
+        {false, State2} ->
+            {next_state, disconnected, State2}
     end;
-handle_info(connect_timeout, _AnyState, State) ->
-    lager:debug("timeout fired, time to die"),
-    {stop, connection_error, State};
+%% called by a timer set in this module
+handle_info(connect_timeout, disconnected, State) ->
+    case connect(State) of
+        {true, State2} ->
+            {next_state, connected, State2};
+        {false, State2} ->
+            {next_state, disconnected, State2}
+    end;
+handle_info(connect_timeout, connected, State) ->
+    %% assume a timer message arrived after a publish call forced
+    %% reconnect.
+    {next_state, connected, State};
 handle_info(Other, AnyState, State) ->
     lager:warning("Unexpected Info message ~p~n", [Other]),
     {next_state, AnyState, State}.
@@ -216,10 +220,11 @@ handle_sync_event(_Event, _From, AnyState, State) ->
 
 terminate(_Reason, _StateName, State) ->
     #state{channel=Channel} = State,
-    if is_pid(Channel) ->
+    case is_pid(Channel) andalso is_process_alive(Channel) of
+        true ->
             rabl_amqp:channel_close(Channel),
             ok;
-       true ->
+        false ->
             ok
     end.
 
@@ -229,6 +234,53 @@ code_change(_OldVsn, StateName, State, _Extra) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+-spec connect(#state{}) -> {boolean(), #state{}}.
+connect(State) ->
+    #state{connection_attempt_counter=CAC,
+           reconnect_delay_millis=Delay0,
+           amqp_params=AMQPParams} = State,
+    {ok, MaxRetries} = application:get_env(rabl, max_connection_retries),
+    case CAC >= MaxRetries of
+        true ->
+            %% stop trying, the next publish attempt will force a
+            %% reconnect attempt. We can start all over the
+            %% connection_attempt_counter and backoff delay variables
+            ResetDelay = default_reconnect_delay(),
+            {false, State#state{channel=undefined,
+                                connection_attempt_counter=0,
+                                reconnect_delay_millis=ResetDelay}};
+        false ->
+            %% try and reconnect, schedule a retry on fail
+            case start_link_channel(AMQPParams) of
+                {ok, Channel} ->
+                    ResetDelay = default_reconnect_delay(),
+                    {true, State#state{channel=Channel,
+                                       connection_attempt_counter=0,
+                                       reconnect_delay_millis=ResetDelay}};
+                {error, Error} ->
+                    lager:error("Connection error ~p for ~p", [Error, AMQPParams]),
+                    erlang:send_after(Delay0, self(), connect_timeout),
+                    Delay = backoff(Delay0),
+                    {false, State#state{reconnect_delay_millis=Delay,
+                                        connection_attempt_counter=CAC+1}}
+            end
+    end.
+
+%% @private basic backoff calculation, with a maximum delay set by app
+%% env var.
+backoff(N) ->
+    backoff(N, application:get_env(rabl, max_reconnect_delay_millis,
+                                   ?DEFAULT_MAX_RECONN_DELAY_MILLIS)).
+
+%% @private exponential backoff with a maximum
+backoff(N, Max) ->
+    min(N*2, Max).
+
+%% @private the reconnect delay reset to the default/app specified
+default_reconnect_delay() ->
+    application:get_env(rabl, reconnect_delay_millis,
+                        ?DEFAULT_RECONN_DELAY_MILLIS).
+
 
 %% @private start_link_channel attempts to start a connection, and
 %% open an a channel, and link to it, if successful it returns the
@@ -277,27 +329,26 @@ make_function(Key, Value) ->
 load_config() ->
     %% @TODO(rdb|robust) validate and crash if poorly configured
     ProducerConf = application:get_env(rabl, producers, []),
-    ReconnectDelay = application:get_env(rabl, reconnect_delay_millis, ?DEFAULT_RECONN_DELAY_MILLIS),
-    {ProducerCount, WorkerNames, ProducerSpecs} = load_config(ProducerConf, ReconnectDelay, {0, [], []}),
+    {ProducerCount, WorkerNames, ProducerSpecs} = load_config(ProducerConf, {0, [], []}),
     [{count, ProducerCount}, {workers, WorkerNames}, {specs, ProducerSpecs}].
 
-load_config([], _Delay, {Total, Names, Specs}) ->
+load_config([], {Total, Names, Specs}) ->
     {Total, lists:reverse(Names), lists:reverse(Specs)};
-load_config([{WorkerCnt, AMQPURI} | Rest], Delay, {Total, Names0, Specs0}) ->
+load_config([{WorkerCnt, AMQPURI} | Rest], {Total, Names0, Specs0}) ->
     {Names2, Specs2} = lists:foldl(fun(I, {Names, Specs}) ->
                                            Name = worker_name(I),
-                                           Spec = producer_spec(Name, AMQPURI, [{reconnect_delay_millis, Delay}]),
+                                           Spec = producer_spec(Name, AMQPURI),
                                            {[Name | Names],
                                             [Spec | Specs]}
                                    end,
                                    {Names0, Specs0},
                                    lists:seq(Total, Total+WorkerCnt-1)),
-    load_config(Rest, Delay, {Total+WorkerCnt, Names2, Specs2}).
+    load_config(Rest, {Total+WorkerCnt, Names2, Specs2}).
 
 %% @private generate a child spec for the given `Worker'.
-producer_spec(Worker, AMQPURI, Opts) ->
+producer_spec(Worker, AMQPURI) ->
     {Worker,
-     {?MODULE, start_link, [Worker, AMQPURI, Opts]},
+     {?MODULE, start_link, [Worker, AMQPURI]},
      permanent,
      5000,
      worker,
@@ -369,7 +420,6 @@ assertArgs(Id, Args) ->
     %% NOTE assumes the order of application env {rabl, producers} is
     %% maintained
     {ok, Env} = application:get_env(rabl, producers),
-    {ok, ExpectedDelay} =  application:get_env(rabl, reconnect_delay_millis),
     ExpandedUrls = expand_urls(Env),
     Lid = atom_to_list(Id),
     Lmod = atom_to_list(?GENERATED_MOD),
@@ -377,11 +427,9 @@ assertArgs(Id, Args) ->
     Cnt = list_to_integer(Lcnt),
     ExpectedUrl = lists:nth(Cnt+1, ExpandedUrls),
 
-    ?assertEqual(3, length(Args)),
+    ?assertEqual(2, length(Args)),
     ?assertEqual(Id, hd(Args)),
-    ?assertEqual(ExpectedUrl, lists:nth(2, Args)),
-    ?assertMatch([{reconnect_delay_millis, ExpectedDelay}],
-                 lists:nth(3, Args)).
+    ?assertEqual(ExpectedUrl, lists:nth(2, Args)).
 
 expand_urls(Env) ->
     lists:foldl(fun({N, Url}, Acc) ->
@@ -390,111 +438,38 @@ expand_urls(Env) ->
                 [],
                 Env).
 
-%% @doc test that a started producer does not crash at once if it
-%% cannot connect to rabbitmq on start up
-no_connected_at_start_delay_test() ->
-    Delay = 1000,
+%% @doc test that a started producer does not crash if it cannot
+%% connect, and that it eventually stops trying
+no_connected_at_start_test() ->
+    Delay = 1,
+    Retries = 10,
     application:set_env(rabl, producers, [{1, "amqp://localhost"}]),
     application:set_env(rabl, reconnect_delay_millis, Delay),
-    load_producer(),
-    Start = rabl_time:monotonic_time(),
-    {ok, Pid} = start_link(test1, "amqp://localhost", [{reconnect_delay_millis, Delay}]),
-    unlink(Pid),
-    MonRef = monitor(process, Pid),
-    receive {'DOWN', MonRef, process, Pid, connection_error} ->
-            Now = rabl_time:monotonic_time(),
-            ?assert(Now-Start >= Delay)
-    after 1500 ->
-            ?assert(false)
-    end.
-
-%% @doc test that a started producer _does_ crash at once if it has
-%% been alive longer than a configured reconnect delay
-crash_no_delay_test() ->
-    Delay = 500,
-    application:set_env(rabl, producers, [{1, "amqp://localhost"}]),
-    application:set_env(rabl, reconnect_delay_millis, Delay),
-    application:set_env(rabl, cluster_name, <<"test_cluster">>),
-
+    application:set_env(rabl, cluster_name, <<"test">>),
+    application:set_env(rabl, max_connection_retries, Retries),
     load_producer(),
 
     meck:new(rabl_amqp, [passthrough]),
-    Pid = self(),
-    meck:expect(rabl_amqp, connection_start, fun(_) ->
-                                                     {ok, rabl_mock:mock_rabl_con(Pid)}
-                                             end),
-    meck:expect(rabl_amqp, channel_open, fun(_) ->
-                                                 {ok, rabl_mock:mock_rabl_chan(Pid)}
-                                         end),
 
-    {ok, Producer} = start_link(test1, "amqp://localhost", [{reconnect_delay_millis, Delay}]),
+    meck:expect(rabl_amqp, connection_start, [{1, meck:val({error, nope})}]),
+
+    {ok, Producer} = start_link(test1, "amqp://localhost"),
     unlink(Producer),
     MonRef = monitor(process, Producer),
 
-    Channel = rabl_mock:receive_channel(Pid),
-    %% just kind of be alive for longer than the reconnect delay
-    timer:sleep(1000),
+    meck:wait(10, rabl_amqp, connection_start,['_'], 2000),
 
-    Start = rabl_time:monotonic_time(),
-
-    exit(Channel, kill),
-
-    receive {'DOWN', MonRef, process, Producer, connection_error} ->
-            Now = rabl_time:monotonic_time(),
-            %% using time like this is inherently dodgy, it would be
-            %% better to get a history trace from the FSM and show
-            %% that it never entered the `disconnected' state, but
-            %% went from `connected' to `terminate'. I should figure
-            %% out how to do that.
-            ?assert(Now-Start < (Delay/2))
-    after 1500 ->
+    receive {'DOWN', MonRef, process, Producer, _Error} ->
             ?assert(false)
-    end,
-    meck:unload(rabl_amqp).
-
-%% @doc test that a started producer doesn't crash at once if it has
-%% been connected shorter than the reconnect delay
-crash_delay_test() ->
-    Delay = 1000,
-    application:set_env(rabl, producers, [{1, "amqp://localhost"}]),
-    application:set_env(rabl, reconnect_delay_millis, Delay),
-    application:set_env(rabl, cluster_name, <<"test_cluster">>),
-
-    load_producer(),
-
-    meck:new(rabl_amqp, [passthrough]),
-    Pid = self(),
-    meck:expect(rabl_amqp, connection_start, fun(_) ->
-                                                     {ok, rabl_mock:mock_rabl_con(Pid)}
-                                             end),
-    meck:expect(rabl_amqp, channel_open, fun(_) ->
-                                                 {ok, rabl_mock:mock_rabl_chan(Pid)}
-                                         end),
-
-    {ok, Producer} = start_link(test1, "amqp://localhost", [{reconnect_delay_millis, Delay}]),
-    unlink(Producer),
-    MonRef = monitor(process, Producer),
-    Start = rabl_time:monotonic_time(),
-
-    Channel = rabl_mock:receive_channel(Pid),
-    %% be alive for less than the delay
-    timer:sleep(200),
-
-    exit(Channel, kill),
-
-    receive {'DOWN', MonRef, process, Producer, connection_error} ->
-            Now = rabl_time:monotonic_time(),
-            %% using time like this is inherently dodgy, it would be
-            %% better to get a history trace from the FSM and show
-            %% that it never entered the `disconnected' state, but
-            %% went from `connected' to `terminate'. I should figure
-            %% out how to do that.
-            ?assert(Now-Start >= Delay)
     after 1500 ->
-            ?assert(false)
+            ?assert(true)
     end,
+
+    ?assertMatch({disconnected, #state{connection_attempt_counter=0}}, sys:get_state(Producer)),
     meck:validate(rabl_amqp),
+    exit(Producer, kill),
     meck:unload(rabl_amqp).
+
 
 %% @doc checks that publish when connected ends with a call to
 %% rabl_amqp publish on the producers channel
@@ -516,7 +491,7 @@ publish_connected_test() ->
                                                  {ok, rabl_mock:mock_rabl_chan(Pid)}
                                          end),
 
-    {ok, Producer} = start_link(hd(?GENERATED_MOD:workers()), "amqp://localhost", [{reconnect_delay_millis, Delay}]),
+    {ok, Producer} = start_link(hd(?GENERATED_MOD:workers()), "amqp://localhost"),
     unlink(Producer),
 
     Channel = rabl_mock:receive_channel(Pid),
@@ -532,48 +507,46 @@ publish_connected_test() ->
     exit(Producer, kill),
     ok.
 
-%% @doc checks that publish returns an error when the producer is not
-%% connected.
+%% @doc checks that producer reconnects on publish if disconnected
 publish_disconnected_test() ->
-ClusterName = <<"test_cluster">>,
-    Delay = 1000,
+    ClusterName = <<"test_cluster">>,
+    Delay = 100,
+    Retries = 1, %% i.e. don't retry
     application:set_env(rabl, producers, [{1, "amqp://localhost"}]),
     application:set_env(rabl, reconnect_delay_millis, Delay),
     application:set_env(rabl, cluster_name, ClusterName),
-
+    application:set_env(rabl, max_connection_retries, Retries),
+    lager:start(),
     load_producer(),
 
     meck:new(rabl_amqp, [passthrough]),
     Pid = self(),
-    meck:expect(rabl_amqp, connection_start, fun(_) ->
-                                                     {ok, rabl_mock:mock_rabl_con(Pid)}
-                                             end),
+    meck:expect(rabl_amqp, connection_start, ['_'], meck:seq([meck:exec(fun(_) -> {ok, rabl_mock:mock_rabl_con(Pid)} end),
+                                                              meck:val({error, nope}),
+                                                              meck:exec(fun(_) -> {ok, rabl_mock:mock_rabl_con(Pid)} end)
+                                                             ])),
     meck:expect(rabl_amqp, channel_open, fun(_) ->
                                                  {ok, rabl_mock:mock_rabl_chan(Pid)}
                                          end),
 
-    {ok, Producer} = start_link(hd(?GENERATED_MOD:workers()), "amqp://localhost", [{reconnect_delay_millis, Delay}]),
+    {ok, Producer} = start_link(hd(?GENERATED_MOD:workers()), "amqp://localhost"),
     unlink(Producer),
-    MonRef = monitor(process, Producer),
 
     Channel = rabl_mock:receive_channel(Pid),
     exit(Channel, kill),
     %% I hate this sleep being here, but how else do we ensure that
     %% the `Down' message is received before the publish message?
     %% Equally, highlights the race, eh?
-    timer:sleep(10),
+    timer:sleep(1000),
 
+    ?assertMatch({disconnected, #state{connection_attempt_counter=0}}, sys:get_state(Producer)),
     PubRes = rabl_producer_fsm:publish(<<"test">>),
-    ?assertEqual({error, no_connection}, PubRes),
+    ?assertEqual(ok, PubRes),
+    ?assertMatch({connected, _}, sys:get_state(Producer)),
 
-    receive {'DOWN', MonRef, process, Producer, connection_error} ->
-            ?assert(true)
-    after 1500 ->
-            ?assert(false)
-    end,
+    exit(Producer, kill),
 
     meck:validate(rabl_amqp),
-
     meck:unload(rabl_amqp),
 
     ok.

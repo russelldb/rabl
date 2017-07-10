@@ -12,5 +12,12 @@
 
 -export([monotonic_time/0]).
 
+-compile(nowarn_deprecated_function).
+
 monotonic_time() ->
-    erlang:monotonic_time(millisecond).
+    try
+        erlang:monotonic_time(millisecond)
+    catch error:undef ->
+            {MS, S, US} = erlang:now(),
+            (MS*1000000+S)*1000000+US
+    end.

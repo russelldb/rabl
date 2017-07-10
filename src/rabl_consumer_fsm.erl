@@ -32,7 +32,6 @@
          code_change/4]).
 
 -define(SERVER, ?MODULE).
--define(DEFAULT_CONN_RETRY_MILLIS, 5000).
 -define(RABL_PUT_OPTS, [asis, disable_hooks]).
 
 -type consumer_state() :: disconnected | unsubscribed | consuming.
@@ -44,10 +43,13 @@
           connection,
           connection_attempt_counter = 0,
           connection_monitor,
-          reconnect_delay_millis=50,
+          reconnect_delay_millis,
           riak_client,
           subscription_tag
          }).
+
+-define(DEFAULT_RECONN_DELAY_MILLIS, 50).
+-define(DEFAULT_MAX_RECONN_DELAY_MILLIS, 10000).
 
 %%%===================================================================
 %%% API
@@ -70,8 +72,10 @@ start_link(AMQPURI) ->
 init([AMQPURI]) ->
     {ok, AMQPParams} = rabl_amqp:parse_uri(AMQPURI),
     {ok, RiakClient} = rabl_riak:client_new(),
+    ReconnectDelay = application:get_env(rabl, reconnect_delay_millis, ?DEFAULT_RECONN_DELAY_MILLIS),
     {ok, disconnected, #state{amqp_params=AMQPParams,
-                              riak_client=RiakClient}, 0}.
+                              riak_client=RiakClient,
+                              reconnect_delay_millis=ReconnectDelay}, 0}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -322,8 +326,8 @@ subscribe(State) ->
 %% @private basic backoff calculation, with a maximum delay set by app
 %% env var.
 backoff(N) ->
-    backoff(N, application:get_env(rabl, connection_retry_delay_millis,
-                                   ?DEFAULT_CONN_RETRY_MILLIS)).
+    backoff(N, application:get_env(rabl, max_reconnect_delay_millis,
+                                   ?DEFAULT_MAX_RECONN_DELAY_MILLIS)).
 
 %% @private exponential backoff with a maximum
 backoff(N, Max) ->
