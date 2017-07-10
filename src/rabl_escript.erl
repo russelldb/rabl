@@ -98,11 +98,18 @@ perform_action('add-hook', ParsedArgs, RiakNode) ->
     BucketProps = rpc:call(RiakNode, riak_core_bucket, get_bucket, [Bucket]),
     io:format("rabl hook added to ~p.~n~p~n", [Bucket, BucketProps]);
 perform_action('consumers', _ParsedArgs, RiakNode) ->
-    case rpc:call(RiakNode, supervisor, which_children, [rabl_sup]) of
+    case rpc:call(RiakNode, supervisor, which_children, [rabl_consumer_sup]) of
         Children when is_list(Children) ->
             io:format("rabl consumers:~n ~p~n", [Children]);
         Error ->
             io:format("Failed to get consumer list with ~p~n", [Error])
+    end;
+perform_action('producers', _ParsedArgs, RiakNode) ->
+    case rpc:call(RiakNode, supervisor, which_children, [rabl_producer_sup]) of
+        Children when is_list(Children) ->
+            io:format("rabl producers:~n ~p~n", [Children]);
+        Error ->
+            io:format("Failed to get producer list with ~p~n", [Error])
     end;
 perform_action('setup-local', _ParsedArgs, RiakNode) ->
     Res = rpc:call(RiakNode, rabl_util, setup_local_smoke_test, []),

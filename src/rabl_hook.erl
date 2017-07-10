@@ -39,7 +39,7 @@ rablicate(Object) ->
     Tag = {Time, node(), erlang:pid_to_list(self())},
     Msg = term_to_binary({Tag, BK, BinObj}),
     lager:debug("rablicating ~p~n", [BK]),
-    Res = case rabl_producer:publish(Msg) of
+    Res = case rabl_producer_fsm:publish(Msg) of
               ok ->
                   rabl_stat:publish(BK, Tag, Time),
                   ok;

@@ -83,12 +83,12 @@ receive_msg({#'basic.deliver'{delivery_tag = Tag}, #'amqp_msg'{payload=Content}}
 receive_msg(Other) ->
     {other, Other}.
 
--spec ack_msg(Channel::pid(), Tag::binary()) -> ok.
-ack_msg(Channel, Tag) when is_pid(Channel), is_binary(Tag) ->
+-spec ack_msg(Channel::pid(), Tag::term()) -> ok.
+ack_msg(Channel, Tag) when is_pid(Channel) ->
     amqp_channel:cast(Channel, #'basic.ack'{delivery_tag = Tag}).
 
--spec nack_msg(Channel::pid(), Tag::binary()) -> ok.
-nack_msg(Channel, Tag) when is_pid(Channel), is_binary(Tag) ->
+-spec nack_msg(Channel::pid(), Tag::term()) -> ok.
+nack_msg(Channel, Tag) when is_pid(Channel) ->
     %% NOTE: made defaults explicit in case they change in future, and
     %% to save time googling docs. This means that only message Tag is
     %% rejected (not those up-to-and-including Tag) and that the
@@ -105,3 +105,30 @@ publish(Channel, Exchange, RoutingKey, Message) when is_pid(Channel),
     Publish = #'basic.publish'{exchange = Exchange, routing_key = RoutingKey},
     amqp_channel:cast(Channel, Publish, #amqp_msg{payload = Message}),
     ok.
+
+-spec queue_create(Channel::pid(), Queue::binary()) ->
+                          {ok, Queue::binary()}.
+queue_create(Channel, Queue) when is_pid(Channel), is_binary(Queue) ->
+    Declare = #'queue.declare'{queue = Queue},
+    #'queue.declare_ok'{} = amqp_channel:call(Channel, Declare),
+    {ok, Queue}.
+
+
+-spec exchange_create(pid(), binary()) -> {ok, binary()}.
+exchange_create(Channel, Name) when is_binary(Name), is_pid(Channel) ->
+    Declare = #'exchange.declare'{exchange = Name},
+    #'exchange.declare_ok'{} = amqp_channel:call(Channel, Declare),
+    {ok, Name}.
+
+
+-spec bind(Channel::pid(), binary(), binary(), RoutingKey::binary()) ->
+                  {ok, RoutingKey::binary()}.
+bind(Channel, Exchange, Queue, RoutingKey) when is_pid(Channel),
+                                                is_binary(Exchange),
+                                                is_binary(Queue),
+                                                is_binary(RoutingKey) ->
+    Binding = #'queue.bind'{queue = Queue,
+                            exchange = Exchange,
+                            routing_key = RoutingKey},
+    #'queue.bind_ok'{} = amqp_channel:call(Channel, Binding),
+    {ok, RoutingKey}.

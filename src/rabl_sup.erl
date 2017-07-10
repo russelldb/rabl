@@ -28,42 +28,18 @@ start_link() ->
 
 %% Child :: {Id,StartFunc,Restart,Shutdown,Type,Modules}
 init([]) ->
-    SupFlags = {one_for_one, 1, 5},
+    SupFlags = {one_for_one, 10, 5},
     RablStat = {rabl_stat, {rabl_stat, start_link, []},
                 transient, 5000, worker, [rabl_stat]},
     RablProducerSup = {rabl_producer_sup, {rabl_producer_sup, start_link, []},
                        permanent, 5000, supervisor, [rabl_producer_sup]},
 
-    ConsumerSpecs = consumer_specs(),
-    {ok, {SupFlags, ConsumerSpecs ++ [RablStat, RablProducerSup]}}.
+    RablConsumerSup = {rabl_consumer_sup, {rabl_consumer_sup, start_link, []},
+                       permanent, 5000, supervisor, [rabl_consumer_sup]},
+
+    {ok, {SupFlags, [RablStat, RablProducerSup, RablConsumerSup]}}.
 
 %%====================================================================
 %% Internal functions
 %%====================================================================
 
-consumer_specs() ->
-    {ok, Consumers} = application:get_env(rabl, consumers),
-    {_Cnt, ChildSpecs} = lists:foldl(fun(Consumer, {ChildCnt, SpecsAcc}) ->
-                                             {ChildCnt2, Specs} = consumers(Consumer, ChildCnt),
-                                             {ChildCnt2, [Specs | SpecsAcc]}
-                                     end,
-                                     {0, []},
-                                     Consumers),
-    lists:flatten(ChildSpecs).
-
-consumers({Cnt, URI}, NameCounter) ->
-    lists:foldl(fun(_Seq, {NameCntAcc, SpecAcc}) ->
-                        {NameCntAcc+1, [child_spec(NameCntAcc, URI) | SpecAcc]}
-                end,
-                {NameCounter, []},
-                lists:seq(1, Cnt)).
-
-child_spec(ChildCnt, URI) ->
-    {consumer_name(ChildCnt),
-     {rabl_consumer_fsm, start_link, [URI]},
-     permanent, 5000, worker, [rabl_consumer_fsm]}.
-
-%% @private give the consumers a descriptive name
--spec consumer_name(non_neg_integer()) -> atom().
-consumer_name(I) when is_integer(I) ->
-    list_to_atom("rabl_consumer_" ++ integer_to_list(I)).
