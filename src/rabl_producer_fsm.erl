@@ -98,17 +98,21 @@ start_link(Name, AMQPURI) ->
 %%--------------------------------------------------------------------
 -spec publish(Msg::binary()) -> ok.
 publish(Msg) ->
-    Worker = get_worker(),
-    lager:debug("publishing on worker ~p~n", [Worker]),
-    try
-        gen_fsm:sync_send_event(Worker, {publish, Msg}, 1000)
-    catch exit:Err ->
-            %% we can retry some specified number of times, or just
-            %% return here? The worker may not be alive. An edge is
-            %% that the `worker` was only alive for a reconnect delay
-            %% window, and terminated before handling this call. This
-            %% is why we call rather than cast.
-            {error, Err}
+    case get_worker() of
+        {error, no_workers} ->
+            {error, no_workers};
+        {ok, Worker} ->
+            lager:debug("publishing on worker ~p~n", [Worker]),
+            try
+                gen_fsm:sync_send_event(Worker, {publish, Msg}, 1000)
+            catch exit:Err ->
+                    %% we can retry some specified number of times, or just
+                    %% return here? The worker may not be alive. An edge is
+                    %% that the `worker` was only alive for a reconnect delay
+                    %% window, and terminated before handling this call. This
+                    %% is why we call rather than cast.
+                    {error, Err}
+            end
     end.
 
 %% @doc generates a module with constant time access to certain
@@ -139,15 +143,23 @@ producer_specs() ->
 %% @doc again borrowed liberally from basho/sidejob. Picks a worker
 %% from the "static" list of workers based on scheduler id of calling
 %% process.
+-spec get_worker() -> {ok, atom()} | {error, no_workers}.
 get_worker() ->
     get_worker(get_scheduler_id()).
 
 %% @private makes testing easier if we don't need to get a real
 %% scheduler ID
+-spec get_worker(non_neg_integer()) ->
+                        {ok, atom()} |
+                        {error, no_workers}.
 get_worker(Scheduler) ->
-    Count = ?GENERATED_MOD:count(),
-    Worker = Scheduler rem Count,
-    worker_name(Worker).
+    case ?GENERATED_MOD:count() of
+        Count when Count > 0 ->
+            Worker = Scheduler rem Count,
+            {ok, worker_name(Worker)};
+        _ ->
+            {error, no_workers}
+    end.
 
 %%%===================================================================
 %%% gen_fsm callbacks
@@ -389,9 +401,16 @@ load_producer_test() ->
 get_worker_test() ->
     application:set_env(rabl, producers, [{10, "amqp://localhost"}]),
     load_producer(),
-    Worker = get_worker(32),
+    {ok, Worker} = get_worker(32),
     ExpectedWorker = worker_name(2),
     ?assertEqual(ExpectedWorker, Worker).
+
+%% @doc tests when no configured workers are added
+get_no_workers_test() ->
+    %% NOTE: no config
+    application:set_env(rabl, producers, []),
+    load_producer(),
+    ?assertMatch({error, no_workers}, get_worker(32)).
 
 %% @doc check that the generated module returns the expected child
 %% specs for the supervisor to start/manage the producers
