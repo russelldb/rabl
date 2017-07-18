@@ -69,7 +69,7 @@ publish() ->
 %%--------------------------------------------------------------------
 -spec consume(erlang:timestamp(), erlang:timestamp()) -> ok.
 consume(PublishTS, ConsumeTS) ->
-    case timer:now_diff(PublishTS, ConsumeTS) of
+    case timer:now_diff(ConsumeTS, PublishTS) of
         Qlatency when Qlatency < 0 ->
             lager:warning("Negative queue latency, check clocks synchronized."),
             ok;
@@ -94,7 +94,7 @@ publish_fail() ->
 %%--------------------------------------------------------------------
 -spec riak_put(success | fail, erlang:timestamp(), erlang:timestamp()) -> ok.
 riak_put(Status, StartTime, EndTime) ->
-    case timer:now_diff(StartTime, EndTime) of
+    case timer:now_diff(EndTime, StartTime) of
         PutLatency when PutLatency < 0 ->
             lager:warning("Negative put latency on local put."),
             ok;
