@@ -19,8 +19,7 @@ start() ->
     start_if_not_started(lager),
     %% I have no idea what is going on with bear, it's not even an
     %% app.
-    ok = start_if_not_started(application, bear),
-    ok = start_if_not_started(folsom),
+    ok = safe_start_folsom(),
     ok = start_if_not_started(amqp_client),
     application:start(rabl).
 
@@ -50,12 +49,15 @@ start_if_not_started(App) ->
             OtherError
     end.
 
-start_if_not_started(application, App) ->
-    case application:start(App) of
-        {error,{already_started, App}} ->
-            ok;
-        ok ->
-            ok;
-        OtherError ->
-            OtherError
+%% @private folsom is started by default by riak, and rabl should be
+%% running in riak, but who knows what people will do? Folsom can't
+%% handle having start called if it is already started. This function
+%% checks if folsom is started before starting it.
+safe_start_folsom() ->
+    application:ensure_started(bear),
+    case whereis(folsom_sup) of
+        undefined ->
+            folsom:start();
+        Pid when is_pid(Pid) ->
+            ok
     end.
