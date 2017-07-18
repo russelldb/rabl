@@ -34,17 +34,15 @@ rablicate(Object) ->
     BK = {riak_object:bucket(Object), riak_object:key(Object)},
     BinObj = riak_object:to_binary(v1, Object),
     Time = os:timestamp(),
-    %% We want to match up remotes, but don't want remote pid prefix
-    %% in remote log, so don't _be_ a pid.
-    Tag = {Time, node(), erlang:pid_to_list(self())},
-    Msg = term_to_binary({Tag, BK, BinObj}),
+    Msg = term_to_binary({Time, BK, BinObj}),
     lager:debug("rablicating ~p~n", [BK]),
     Res = case rabl_producer_fsm:publish(Msg) of
               ok ->
-                  rabl_stat:publish(BK, Tag, Time),
+                  rabl_stat:publish(),
                   ok;
               Error ->
-                  rabl_stat:publish_fail(BK, Tag, Time, Error),
+                  rabl_stat:publish_fail(),
+                  lager:error("Rablication error ~p", [Error]),
                   {fail, Error}
           end,
     Res.

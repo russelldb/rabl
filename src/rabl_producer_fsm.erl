@@ -201,7 +201,7 @@ disconnected({publish, Msg}, _From, State) ->
 %% info callbacks
 %% Called when a the channel exits
 handle_info({'EXIT', Channel, Reason}, _AnyState, State=#state{channel=Channel}) ->
-    lager:error("Rabbit Connection Exited with reason ~p ~p", [Reason]),
+    lager:error("Rabbit Connection Exited with reason ~p", [Reason]),
     case connect(State) of
         {true, State2} ->
             {next_state, connected, State2};

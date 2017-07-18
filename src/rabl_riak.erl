@@ -11,6 +11,10 @@
 
 -export_type([client/0, object/0]).
 
+%% we don't depend on riak_kv, but can only be run inside a riak node
+-ignore_xref({riak, local_client, 0}).
+-ignore_xref({riak_object, from_binary, 3}).
+
 -opaque client() :: riak_client:riak_client().
 -opaque object() :: riak_object:riak_object().
 -type bucket() :: riak_object:bucket().

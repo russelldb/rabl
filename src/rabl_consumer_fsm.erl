@@ -50,6 +50,7 @@
 
 -define(DEFAULT_RECONN_DELAY_MILLIS, 50).
 -define(DEFAULT_MAX_RECONN_DELAY_MILLIS, 10000).
+-define(DEFAULT_PREFETCH, 10).
 
 %%%===================================================================
 %%% API
@@ -170,6 +171,7 @@ handle_info({'DOWN', ConnMonRef, process, Connection, Reason},
     connect(State);
 handle_info(Info, AnyState, State) ->
     %% TODO implement throttle here?
+    Time = os:timestamp(),
     case rabl_amqp:receive_msg(Info) of
         {rabbit_msg, ok} -> {next_state, AnyState, State};
         {rabbit_msg, cancel} ->
@@ -177,21 +179,25 @@ handle_info(Info, AnyState, State) ->
             {stop, subscription_cancelled, State};
         {rabbit_msg, {msg, Message, Tag}} ->
             #state{riak_client=Client, channel=Channel} = State,
-            Time = os:timestamp(),
-            {TimingTag, {B, K}=BK, BinObj} = binary_to_term(Message),
-            rabl_stat:consume(BK, TimingTag, Time),
+            {PublishTime, {B, K}, BinObj} = binary_to_term(Message),
+            rabl_stat:consume(PublishTime, Time),
 
             Obj = rabl_riak:object_from_binary(B, K, BinObj),
             lager:debug("rabl putting ~p ~p~n", [B, K]),
+            StartPut = os:timestamp(),
             case rabl_riak:client_put(Client, Obj, ?RABL_PUT_OPTS) of
                 ok ->
+                    EndPut = os:timestamp(),
                     %% @TODO something about channel/ack failures
-                    ok = rabl_amqp:ack_msg(Channel, Tag);
+                    ok = rabl_amqp:ack_msg(Channel, Tag),
+                    rabl_stat:riak_put(success, StartPut, EndPut);
                 Error ->
                     %% @TODO (consider client timeouts | overload etc
                     %% here. eg SLEEP if overload?)
                     ok = rabl_amqp:nack_msg(Channel, Tag),
-                    lager:error("Failed to replicate ~p ~p with Error ~p", [B, K, Error])
+                    EndPut = os:timestamp(),
+                    rabl_stat:riak_put(fail, StartPut, EndPut),
+                    lager:error("Failed to consume replicated object ~p ~p with Error ~p", [B, K, Error])
             end,
             {next_state, AnyState, State};
         OtherInfo ->
@@ -243,6 +249,7 @@ connect(State) ->
            reconnect_delay_millis=Delay,
            connection_attempt_counter=CAC} = State,
     {ok, MaxRetries} = application:get_env(rabl, max_connection_retries),
+    PrefetchCount = application:get_env(rabl, prefetch_count, ?DEFAULT_PREFETCH),
     Delay2 = backoff(Delay),
 
     case CAC >= MaxRetries of
@@ -256,7 +263,7 @@ connect(State) ->
                         {ok, Channel} ->
                             ChanMonRef = erlang:monitor(process, Channel),
                             %% @TODO magic number
-                            ok = rabl_amqp:set_prefetch_count(Channel, 1),
+                            ok = rabl_amqp:set_prefetch_count(Channel, PrefetchCount),
                             subscribe(State#state{channel=Channel,
                                                   channel_monitor=ChanMonRef,
                                                   connection_monitor=ConnMonRef,
@@ -632,7 +639,9 @@ handles_rabbit_messages() ->
              ],
     meck:expect(rabl_amqp, receive_msg, ['_'], meck:seq(MsgSeq)),
 
-    meck:expect(rabl_stat, consume, [BK, TimingTag, '_'], ok),
+    meck:expect(rabl_stat, consume, ['_', '_'], ok),
+    meck:expect(rabl_stat, riak_put, [{[success, '_', '_'], ok},
+                                      {[fail, '_', '_'], ok}]),
     meck:expect(rabl_riak, object_from_binary, [B, K, DummyObject], mock_riak_object),
     meck:expect(rabl_riak, client_put, [mock_client, mock_riak_object, ?RABL_PUT_OPTS],
                 meck:seq([ok,

@@ -26,7 +26,7 @@ put(Bucket, Key, Value) ->
 
 %% sets up exchange, queue, bindings locally for a smoke test NOTE:
 %% run before starting the app.
-setup_local_smoke_test() ->
+setup_local_smoke() ->
     application:load(rabl),
     RablEnv = application:get_all_env(rabl),
     ClusterName = proplists:get_value(cluster_name, RablEnv),

@@ -7,6 +7,7 @@
    [kernel,
     stdlib,
     amqp_client,
+    folsom,
     lager
    ]},
   {env,[

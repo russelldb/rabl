@@ -10,12 +10,17 @@
 
 -behaviour(gen_server).
 
+-ifdef(TEST).
+-include_lib("eunit/include/eunit.hrl").
+-endif.
+
 %% API
 -export([
-         consume/3,
-         consume_fail/4,
-         publish/3,
-         publish_fail/4,
+         consume/2,
+         get_stats/0,
+         publish/0,
+         publish_fail/0,
+         riak_put/3,
          start_link/0
         ]).
 
@@ -25,10 +30,15 @@
 
 -define(SERVER, ?MODULE).
 
--type bucket_key() :: {binary(), binary()} | {{binary(), binary()}, binary()}.
--type timing_tag() :: any(). %% whatever you want for correlating across nodes
+-type stats() :: [{stat_name(), stat_val()}].
+-type stat_name() :: atom().
+-type stat_val() :: histogram() | meter().
+-type histograms() :: [{stat_name(), histogram()}].
+-type meters() :: [{stat_name(), meter()}].
+-type histogram() :: proplists:proplist().
+-type meter() :: proplists:proplist().
 
--record(state, {publish_log, consume_log, log_dir}).
+-record(state, {}).
 
 %%%===================================================================
 %%% API
@@ -48,38 +58,64 @@ start_link() ->
 %% Called when a hook publishes a riak_object
 %%%% @end
 %%--------------------------------------------------------------------
--spec publish(bucket_key(), timing_tag(), erlang:timestamp()) -> ok.
-publish(BK, Tag, Timestamp) ->
-    gen_server:cast(?MODULE, {publish, BK, Tag, Timestamp}).
+-spec publish() -> ok.
+publish() ->
+    folsom_metrics:notify({publish, 1}).
 
 %%--------------------------------------------------------------------
 %% @doc
 %% Called when a consumer recieves an riak_object
 %%%% @end
 %%--------------------------------------------------------------------
--spec consume(bucket_key(), timing_tag(), erlang:timestamp()) -> ok.
-consume(BK, Tag, Timestamp) ->
-    gen_server:cast(?MODULE, {consume, BK, Tag, Timestamp}).
+-spec consume(erlang:timestamp(), erlang:timestamp()) -> ok.
+consume(PublishTS, ConsumeTS) ->
+    case timer:now_diff(PublishTS, ConsumeTS) of
+        Qlatency when Qlatency < 0 ->
+            lager:warning("Negative queue latency, check clocks synchronized."),
+            ok;
+        Qlatency ->
+            folsom_metrics:notify({queue_latency, Qlatency})
+    end.
 
 %%--------------------------------------------------------------------
 %% @doc
 %% Called when a hook fails to publish a riak object
 %%%% @end
 %%--------------------------------------------------------------------
--spec publish_fail(bucket_key(), timing_tag(), erlang:timestamp(), Reason::term())
-                  -> ok.
-publish_fail(BK, Tag, Timestamp, Reason) ->
-    gen_server:cast(?MODULE, {publish_fail, BK, Tag, Timestamp, Reason}).
+-spec publish_fail() -> ok.
+publish_fail() ->
+    folsom_metrics:notify({publish_fail, 1}).
+
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Called when a consumer recieves an riak_object, and then nacks it.
+%% Called when a consumer gets a result from a local riak put
 %%%% @end
 %%--------------------------------------------------------------------
--spec consume_fail(bucket_key(), timing_tag(), erlang:timestamp(), Reason::term())
-                  -> ok.
-consume_fail(BK, Tag, Timestamp, Reason) ->
-    gen_server:cast(?MODULE, {consume_fail, BK, Tag, Timestamp, Reason}).
+-spec riak_put(success | fail, erlang:timestamp(), erlang:timestamp()) -> ok.
+riak_put(Status, StartTime, EndTime) ->
+    case timer:now_diff(StartTime, EndTime) of
+        PutLatency when PutLatency < 0 ->
+            lager:warning("Negative put latency on local put."),
+            ok;
+        PutLatency ->
+            folsom_metrics:notify({put_latency, PutLatency})
+    end,
+    case Status of
+        fail ->
+            folsom_metrics:notify({consume_fail, 1});
+        success ->
+            folsom_metrics:notify({consume, 1})
+    end.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Get the stats
+%%%% @end
+%%--------------------------------------------------------------------
+-spec get_stats() -> stats().
+get_stats() ->
+    gen_server:call(?MODULE, get_stats, 5000).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -97,12 +133,8 @@ consume_fail(BK, Tag, Timestamp, Reason) ->
 %% @end
 %%--------------------------------------------------------------------
 init([]) ->
-    %% this probably needs thinking about, eh?
-    LogDir = application:get_env(rabl, log_dir, "/tmp/rabl_log/"),
-    ok = filelib:ensure_dir(LogDir),
-    {ok, PubLog} = file:open(filename:join([LogDir, publish]), [append]),
-    {ok, ConLog} = file:open(filename:join([LogDir, consume]), [append]),
-    {ok, #state{publish_log=PubLog, consume_log=ConLog, log_dir=LogDir}}.
+    ok = maybe_create_metrics(),
+    {ok, #state{}}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -118,8 +150,10 @@ init([]) ->
 %%                                   {stop, Reason, State}
 %% @end
 %%--------------------------------------------------------------------
-handle_call(_Request, _From, State) ->
-    Reply = ok,
+handle_call(get_stats, _From, State) ->
+    Histos = get_histograms(),
+    Meters = get_meters(),
+    Reply = {ok, Histos ++ Meters},
     {reply, Reply, State}.
 
 %%--------------------------------------------------------------------
@@ -132,13 +166,7 @@ handle_call(_Request, _From, State) ->
 %%                                  {stop, Reason, State}
 %% @end
 %%--------------------------------------------------------------------
-handle_cast({publish, BK, Tag, Timestamp}, State) ->
-    #state{publish_log=PubLog} = State,
-    ok = write_logline(PubLog, BK, Tag, Timestamp),
-    {noreply, State};
-handle_cast({consume, BK, Tag, Timestamp}, State) ->
-    #state{consume_log=ConLog} = State,
-    ok = write_logline(ConLog, BK, Tag, Timestamp),
+handle_cast(_Msg, State) ->
     {noreply, State}.
 
 %%--------------------------------------------------------------------
@@ -165,10 +193,7 @@ handle_info(_Info, State) ->
 %% @spec terminate(Reason, State) -> void()
 %% @end
 %%--------------------------------------------------------------------
-terminate(_Reason, State) ->
-    #state{consume_log=ConLog, publish_log=PubLog} = State,
-    file:close(ConLog),
-    file:close(PubLog),
+terminate(_Reason, _State) ->
     ok.
 
 %%--------------------------------------------------------------------
@@ -185,19 +210,81 @@ code_change(_OldVsn, State, _Extra) ->
 %%%===================================================================
 %% % Internal functions
 %% %===================================================================
-%% @private every library, even every module, has to have one. Should
-%% be in OTP stdlib, right?
--spec ts_to_ms(erlang:timestamp()) -> integer().
-ts_to_ms({Mega, Sec, Micro}) ->
-    (Mega*1000000+Sec)*1000000+Micro.
 
-%% @private why write it twice? Normalises log lines by hashing unique
-%% information into a tag, and turning erlang:timestamp() into an
-%% posix millisecond stamp.
--spec write_logline(IODevice::any(), any(), any(), erlang:timestamp()) -> ok.
-write_logline(FD, BK, Tag, Timestamp) ->
-    LogTag0 = term_to_binary({BK, Tag}),
-    LogTag = binary:decode_unsigned(crypto:hash(sha, LogTag0)),
-    Time = ts_to_ms(Timestamp),
-    ok = io:fwrite(FD, "~w ~w~n", [LogTag, Time]),
-    ok.
+%% @private set up the metrics needed in folsom
+-spec maybe_create_metrics() -> ok | {error, Reason::term()}.
+maybe_create_metrics() ->
+    maybe_create_metrics([
+                          {new_histogram, [queue_latency, slide, 10]},
+                          {new_histogram, [put_latency, slide, 10]},
+                          {new_meter, [publish]},
+                          {new_meter, [consume]},
+                          {new_meter, [publish_fail]},
+                          {new_meter, [consume_fail]}
+                         ]).
+
+-spec maybe_create_metrics(Metrics::[{atom(), atom(), integer()}]) ->
+                                  ok | {error, Reason::term()}.
+maybe_create_metrics([]) ->
+    ok;
+maybe_create_metrics([{NewFun, Args} | Metrics]) ->
+    case apply(folsom_metrics, NewFun, Args) of
+        {error, _Name, metric_already_exists} ->
+            maybe_create_metrics(Metrics);
+        ok ->
+            maybe_create_metrics(Metrics);
+        OtherError ->
+            {error, OtherError}
+    end.
+
+-spec get_histograms() -> {ok, histograms()}.
+get_histograms() ->
+    [{Name, folsom_metrics:get_histogram_statistics(Name)} ||
+        Name <- [queue_latency, put_latency]].
+
+-spec get_meters() -> {ok, meters()}.
+get_meters() ->
+    [{Name, folsom_metrics:get_metric_value(Name)} ||
+        Name <- [publish_fail, publish, consume_fail, consume]].
+
+
+
+%%%===================================================================
+%% TESTS
+%%%===================================================================
+-ifdef(TEST).
+
+metrics_test() ->
+    application:ensure_started(folsom),
+    {ok, Pid} = start_link(),
+    unlink(Pid),
+    MonRef = monitor(process, Pid),
+    assert_stats_created(),
+
+    add_stats(),
+
+    exit(Pid, kill),
+
+    receive
+        {'DOWN', MonRef, process, Pid, killed} ->
+            %% Wait for dead before restarting
+            ok
+    end,
+
+    {ok, _Pid2} = start_link(),
+
+    assert_stats_created(),
+    assert_stats_survived_crash().
+
+assert_stats_created() ->
+    Expected = lists:sort([consume,publish,queue_latency,put_latency,publish_fail,consume_fail]),
+    ?assertEqual(Expected, lists:sort(folsom_metrics:get_metrics())).
+
+add_stats() ->
+    [folsom_metrics:notify({Name, 1000}) || Name <- [consume, consume_fail, publish_fail, publish]].
+
+assert_stats_survived_crash() ->
+    {ok, Stats} = get_stats(),
+    [?assertMatch({Name, [{count, 1000} | _]}, proplists:lookup(Name, Stats)) || Name <- [consume, consume_fail, publish_fail, publish]].
+
+-endif.

@@ -17,7 +17,11 @@
 
 start() ->
     start_if_not_started(lager),
-    start_if_not_started(amqp_client),
+    %% I have no idea what is going on with bear, it's not even an
+    %% app.
+    ok = start_if_not_started(application, bear),
+    ok = start_if_not_started(folsom),
+    ok = start_if_not_started(amqp_client),
     application:start(rabl).
 
 %% information about the running status of rabl
@@ -38,6 +42,16 @@ stop(_State) ->
 %%====================================================================
 start_if_not_started(App) ->
     case App:start() of
+        {error,{already_started, App}} ->
+            ok;
+        ok ->
+            ok;
+        OtherError ->
+            OtherError
+    end.
+
+start_if_not_started(application, App) ->
+    case application:start(App) of
         {error,{already_started, App}} ->
             ok;
         ok ->
