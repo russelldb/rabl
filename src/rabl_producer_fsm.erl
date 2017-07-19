@@ -59,6 +59,7 @@
 
 -record(state, {
           channel,
+          connection, %% needed for clean shutdown
           queue,
           amqp_params,
           reconnect_delay_millis=?DEFAULT_RECONN_DELAY_MILLIS,
@@ -231,11 +232,11 @@ handle_sync_event(_Event, _From, AnyState, State) ->
     {next_state, AnyState, State}.
 
 terminate(_Reason, _StateName, State) ->
-    #state{channel=Channel} = State,
-    case is_pid(Channel) andalso is_process_alive(Channel) of
+    #state{channel=Channel, connection=Connection} = State,
+    case is_pid(Channel) andalso is_process_alive(Channel)
+    andalso is_pid(Connection) andalso is_process_alive(Connection) of
         true ->
-            rabl_amqp:channel_close(Channel),
-            ok;
+            disconnect(Connection, Channel);
         false ->
             ok
     end.
@@ -246,6 +247,13 @@ code_change(_OldVsn, StateName, State, _Extra) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+disconnect(Connection, Channel) ->
+    unlink(Connection),
+    unlink(Channel),
+    rabl_amqp:channel_close(Channel),
+    rabl_amqp:connection_close(Connection),
+    ok.
+
 -spec connect(#state{}) -> {boolean(), #state{}}.
 connect(State) ->
     #state{connection_attempt_counter=CAC,
@@ -259,14 +267,16 @@ connect(State) ->
             %% connection_attempt_counter and backoff delay variables
             ResetDelay = default_reconnect_delay(),
             {false, State#state{channel=undefined,
+                                connection=undefined,
                                 connection_attempt_counter=0,
                                 reconnect_delay_millis=ResetDelay}};
         false ->
             %% try and reconnect, schedule a retry on fail
             case start_link_channel(AMQPParams) of
-                {ok, Channel} ->
+                {ok, Channel, Connection} ->
                     ResetDelay = default_reconnect_delay(),
                     {true, State#state{channel=Channel,
+                                       connection=Connection,
                                        connection_attempt_counter=0,
                                        reconnect_delay_millis=ResetDelay}};
                 {error, Error} ->
@@ -307,7 +317,7 @@ start_link_channel(AMQPParams) ->
             case rabl_amqp:channel_open(Connection) of
                 {ok, Channel} ->
                     link(Channel),
-                    {ok, Channel};
+                    {ok, Channel, Connection};
                 Error ->
                     unlink(Connection),
                     {error, Error}
