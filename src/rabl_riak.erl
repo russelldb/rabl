@@ -39,6 +39,11 @@ set_bucket(Client, Bucket, Props) ->
     ok = Client:set_bucket(Bucket, Props),
     ok.
 
+%% @doc get bucket props.
+-spec get_bucket(client(), Bucket::binary()) -> proplists:proplist().
+get_bucket(Client, Bucket) ->
+    Client:get_bucket(Bucket).
+
 %% @doc bridge to riak_object code, take a riak object binary and
 %% decode it.
 -spec object_from_binary(bucket(), key(), binary()) -> object().

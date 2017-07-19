@@ -14,6 +14,15 @@ add_hook(Bucket) ->
     {ok, C} = rabl_riak:client_new(),
     rabl_riak:set_bucket(C, Bucket,[{postcommit, [{struct,[{<<"mod">>,<<"rabl_hook">>},{<<"fun">>, <<"rablicate">>}]}]}]).
 
+%% @doc get bucket props.
+-spec get_bucket(Bucket::binary()) -> proplists:proplist().
+get_bucket(Bucket) ->
+    {ok, C} = rabl_riak:client_new(),
+    rabl_riak:get_bucket(C, Bucket).
+
+load() ->
+    application:load(rabl).
+
 %% convenience local put
 -spec put(Bucket::binary() | {binary(), binary()},
           Key::binary(), Val::binary()) -> ok.
@@ -54,4 +63,3 @@ setup_queue(Queue, AMQPURI) ->
     io:format("made exchange~n"),
     {ok, RoutingKey} = rabl_amqp:bind(Channel, Exchange, Queue, Queue),
     RoutingKey.
-
