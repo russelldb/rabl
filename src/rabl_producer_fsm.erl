@@ -42,7 +42,7 @@
 -endif.
 
 %% API
--export([start_link/2, publish/1,
+-export([start_link/2, publish/1, status/1, workers/0,
          load_producer/0, get_worker/0, producer_specs/0]).
 
 %% gen_fsm callbacks
@@ -62,6 +62,7 @@
           connection, %% needed for clean shutdown
           queue,
           amqp_params,
+          connection_start_time,
           reconnect_delay_millis=?DEFAULT_RECONN_DELAY_MILLIS,
           connection_attempt_counter = 0
          }).
@@ -140,6 +141,19 @@ load_producer() ->
 %% load_producer/0
 producer_specs() ->
     ?GENERATED_MOD:specs().
+
+%% @doc again borrowed liberally from basho/sidejob. Picks a worker
+%% from the "static" list of workers based on scheduler id of calling
+%% process.
+-spec workers() -> [atom()].
+workers() ->
+    ?GENERATED_MOD:workers().
+
+
+-spec status(atom()) -> {atom(), Status::term()}.
+status(Worker) ->
+    Status = (catch gen_fsm:sync_send_all_state_event(Worker, status, 5000)),
+    {Worker, Status}.
 
 %% @doc again borrowed liberally from basho/sidejob. Picks a worker
 %% from the "static" list of workers based on scheduler id of calling
@@ -228,6 +242,9 @@ handle_info(Other, AnyState, State) ->
 handle_event(_Event, AnyState, State) ->
     {next_state, AnyState, State}.
 
+handle_sync_event(status, _From, AnyState, State) ->
+    Status = handle_status(AnyState, State),
+    {reply, Status, AnyState, State};
 handle_sync_event(_Event, _From, AnyState, State) ->
     {next_state, AnyState, State}.
 
@@ -268,6 +285,7 @@ connect(State) ->
             ResetDelay = default_reconnect_delay(),
             {false, State#state{channel=undefined,
                                 connection=undefined,
+                                connection_start_time=undefined,
                                 connection_attempt_counter=0,
                                 reconnect_delay_millis=ResetDelay}};
         false ->
@@ -277,6 +295,7 @@ connect(State) ->
                     ResetDelay = default_reconnect_delay(),
                     {true, State#state{channel=Channel,
                                        connection=Connection,
+                                       connection_start_time=os:timestamp(),
                                        connection_attempt_counter=0,
                                        reconnect_delay_millis=ResetDelay}};
                 {error, Error} ->
@@ -324,6 +343,22 @@ start_link_channel(AMQPParams) ->
             end;
         Error ->
             {error, Error}
+    end.
+
+%% @private generate a status report for this worker
+-spec handle_status(StateName::atom(), State::#state{}) -> proplists:proplist().
+handle_status(StateName, State) ->
+    #state{connection_start_time=StartTime,
+           amqp_params=Params} = State,
+    case StateName of
+        connected ->
+            ConnTime = timer:now_diff(os:timestamp(), StartTime),
+            [{connection_time, ConnTime},
+             {connection_params, Params},
+             {status, connected}];
+        disconnected ->
+            [{status, disconnected},
+             {connection_params, Params}]
     end.
 
 %%%===================================================================

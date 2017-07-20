@@ -11,7 +11,7 @@
 -behaviour(supervisor).
 
 %% API
--export([start_link/0]).
+-export([start_link/0, status/0]).
 
 %% Supervisor callbacks
 -export([init/1]).
@@ -25,6 +25,11 @@
 -spec start_link() -> {ok, pid()} | {error, Error::term()}.
 start_link() ->
     supervisor:start_link({local, ?SERVER}, ?MODULE, []).
+
+-spec status() -> list().
+status() ->
+    Children = supervisor:which_children(?MODULE),
+    [rabl_consumer_fsm:status(element(1, Child)) || Child <- Children].
 
 %%%===================================================================
 %%% Supervisor callbacks
@@ -64,8 +69,9 @@ consumers({Cnt, URI}, NameCounter) ->
                 lists:seq(1, Cnt)).
 
 child_spec(ChildCnt, URI) ->
-    {consumer_name(ChildCnt),
-     {rabl_consumer_fsm, start_link, [URI]},
+    Name = consumer_name(ChildCnt),
+    {Name,
+     {rabl_consumer_fsm, start_link, [Name, URI]},
      permanent, 5000, worker, [rabl_consumer_fsm]}.
 
 %% @private give the consumers a descriptive name

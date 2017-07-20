@@ -18,7 +18,7 @@
 -endif.
 
 %% API
--export([start_link/1]).
+-export([start_link/2, status/1]).
 
 %% gen_fsm callbacks
 -export([init/1,
@@ -41,6 +41,7 @@
           channel,
           channel_monitor,
           connection,
+          connection_start_time,
           connection_attempt_counter = 0,
           connection_monitor,
           reconnect_delay_millis,
@@ -55,9 +56,14 @@
 %%%===================================================================
 %%% API
 %%%===================================================================
--spec start_link(AMQPUri::string()) -> {ok, pid()} | ignore | {error, Error::any()}.
-start_link(AMQPURI) ->
-    gen_fsm:start_link(?MODULE, [AMQPURI], []).
+-spec start_link(Name::atom(), AMQPUri::string()) -> {ok, pid()} | ignore | {error, Error::any()}.
+start_link(Name, AMQPURI) ->
+    gen_fsm:start_link({local, Name}, ?MODULE, [AMQPURI], []).
+
+-spec status(atom()) -> {atom(), term()}.
+status(Worker) ->
+    Status = (catch gen_fsm:sync_send_all_state_event(Worker, status, 5000)),
+    {Worker, Status}.
 
 %%%===================================================================
 %%% gen_fsm callbacks
@@ -128,6 +134,9 @@ handle_event(Event, StateName, State) ->
 -spec handle_sync_event(Event::term(), From::{pid(), Tag::any()},
                         consumer_state(), #state{}) ->
                                 {next_state, consumer_state(), #state{}}.
+handle_sync_event(status, _From, StateName, State) ->
+    Status = handle_status(StateName, State),
+    {reply, Status, StateName, State};
 handle_sync_event(Event, From, StateName, State) ->
     lager:info("Unexpected sync all state event ~p from ~p when in state ~p~n", [Event, From, StateName]),
     {next_state, StateName, State}.
@@ -268,6 +277,7 @@ connect(State) ->
                                                   channel_monitor=ChanMonRef,
                                                   connection_monitor=ConnMonRef,
                                                   connection=Connection,
+                                                  connection_start_time=os:timestamp(),
                                                   reconnect_delay_millis=50,
                                                   connection_attempt_counter=0});
                         ChannelOpenError ->
@@ -340,6 +350,22 @@ backoff(N) ->
 backoff(N, Max) ->
     min(N*2, Max).
 
+%% @private generate a status report for this worker
+-spec handle_status(StateName::atom(), State::#state{}) -> proplists:proplist().
+handle_status(StateName, State) ->
+    #state{connection_start_time=StartTime,
+           amqp_params=Params} = State,
+    case StateName of
+        consuming ->
+            ConnTime = timer:now_diff(os:timestamp(), StartTime),
+            [{connection_time, ConnTime},
+             {connection_params, Params},
+             {status, consuming}];
+        _ ->
+            [{status, disconnected},
+             {connection_params, Params}]
+    end.
+
 %% TESTS
 -ifdef(TEST).
 
@@ -375,7 +401,7 @@ fail_on_max_conn_attempts() ->
     meck:expect(rabl_amqp, connection_start, ['_'], meck:val({error, econnrefused})),
     mock_riak(),
 
-    {ok, Consumer} = start_link(?AMQPURI),
+    {ok, Consumer} = start_link(test, ?AMQPURI),
     unlink(Consumer),
     Mon = monitor(process, Consumer),
     ?assertMatch(ok, meck:wait(5, rabl_amqp, connection_start, ['_'], 5000)),
@@ -400,7 +426,7 @@ fail_on_max_channel_open_errors() ->
     meck:expect(rabl_amqp, connection_close, ['_'], meck:val(ok)),
     meck:expect(rabl_amqp, channel_open, ['_'], meck:val({error, channel_open_error})),
 
-    {ok, Consumer} = start_link(?AMQPURI),
+    {ok, Consumer} = start_link(test, ?AMQPURI),
     unlink(Consumer),
     Mon = monitor(process, Consumer),
     ?assertMatch(ok, meck:wait(5, rabl_amqp, connection_start, ['_'], 5000)),
@@ -432,7 +458,7 @@ reopen_closed_connections() ->
     meck:expect(rabl_amqp, set_prefetch_count, ['_', '_'], meck:val(ok)),
     meck:expect(rabl_amqp, subscribe, ['_', '_', '_'], meck:val({ok, <<"subscription">>})),
 
-    {ok, Consumer} = start_link(?AMQPURI),
+    {ok, Consumer} = start_link(test, ?AMQPURI),
     unlink(Consumer),
     Mon = monitor(process, Consumer),
 
@@ -461,7 +487,7 @@ reopen_closed_connections() ->
     after 1000 -> ?assert(true)
     end,
 
-    exit(Consumer, normal),
+    exit(Consumer, kill),
 
     meck:unload(rabl_amqp),
     unmock_riak().
@@ -481,7 +507,7 @@ reopen_closed_channels() ->
     meck:expect(rabl_amqp, set_prefetch_count, ['_', '_'], meck:val(ok)),
     meck:expect(rabl_amqp, subscribe, ['_', '_', '_'], meck:val({ok, <<"subscription">>})),
 
-    {ok, Consumer} = start_link(?AMQPURI),
+    {ok, Consumer} = start_link(test, ?AMQPURI),
     unlink(Consumer),
 
     ?assertMatch(ok, meck:wait(1, rabl_amqp, connection_start, ['_'], 1000)),
@@ -499,7 +525,7 @@ reopen_closed_channels() ->
 
     ?assertNotEqual(CurrentChan, NewChan),
 
-    exit(Consumer, normal),
+    exit(Consumer, kill),
     meck:unload(rabl_amqp),
     unmock_riak().
 
@@ -519,7 +545,7 @@ reopen_closed_channels_and_connections() ->
     meck:expect(rabl_amqp, set_prefetch_count, ['_', '_'], meck:val(ok)),
     meck:expect(rabl_amqp, subscribe, ['_', '_', '_'], meck:val({ok, <<"subscription">>})),
 
-    {ok, Consumer} = start_link(?AMQPURI),
+    {ok, Consumer} = start_link(test, ?AMQPURI),
     unlink(Consumer),
 
     ?assertMatch(ok, meck:wait(1, rabl_amqp, connection_start, ['_'], 1000)),
@@ -549,7 +575,7 @@ reopen_closed_channels_and_connections() ->
     ?assertNotEqual(CurrentCon, NewCon),
     ?assertNotEqual(CurrentChan, NewChan),
 
-    exit(Consumer, normal),
+    exit(Consumer, kill),
 
     meck:unload(rabl_amqp),
     unmock_riak().
@@ -570,7 +596,7 @@ fail_on_max_subscribe_errors() ->
     meck:expect(rabl_amqp, set_prefetch_count, ['_', '_'], meck:val(ok)),
     meck:expect(rabl_amqp, subscribe, ['_', '_', '_'], meck:val({error, subscribe_fail})),
 
-    {ok, Consumer} = start_link(?AMQPURI),
+    {ok, Consumer} = start_link(test, ?AMQPURI),
     unlink(Consumer),
     Mon = monitor(process, Consumer),
     ?assertMatch(ok, meck:wait(1, rabl_amqp, connection_start, ['_'], 5000)),
@@ -604,7 +630,7 @@ subscribe_noproc_reconnects() ->
                          ])
                ),
 
-    {ok, Consumer} = start_link(?AMQPURI),
+    {ok, Consumer} = start_link(test, ?AMQPURI),
     unlink(Consumer),
     _Mon = monitor(process, Consumer),
     ?assertMatch(ok, meck:wait(2, rabl_amqp, connection_start, ['_'], 5000)),
@@ -612,7 +638,7 @@ subscribe_noproc_reconnects() ->
     ?assertMatch(ok, meck:wait(2, rabl_amqp, subscribe, ['_', '_', '_'], 5000)),
     ?assertMatch(ok, meck:wait(1, rabl_amqp, connection_close, ['_'], 5000)),
     ?assertMatch(ok, meck:wait(1, rabl_amqp, channel_close, ['_'], 5000)),
-
+    exit(Consumer, kill),
     meck:unload(rabl_amqp),
     unmock_riak().
 
@@ -648,7 +674,7 @@ handles_rabbit_messages() ->
                           {error, overload}])
                ),
 
-    {ok, Consumer} = start_link(?AMQPURI),
+    {ok, Consumer} = start_link(test, ?AMQPURI),
     unlink(Consumer),
     Mon = monitor(process, Consumer),
     Channel = rabl_mock:receive_channel(self()),

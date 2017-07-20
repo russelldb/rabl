@@ -25,7 +25,9 @@ start() ->
 
 %% information about the running status of rabl
 status() ->
-    ok.
+    ConsumerStatus = rabl_consumer_sup:status(),
+    ProducerStatus = rabl_producer_sup:status(),
+    ConsumerStatus ++ ProducerStatus.
 
 start(_StartType, _StartArgs) ->
     lager:info("rabl starting"),

@@ -11,7 +11,8 @@
 -behaviour(supervisor).
 
 %% API
--export([start_link/0]).
+-export([start_link/0,
+         status/0]).
 
 %% Supervisor callbacks
 -export([init/1]).
@@ -25,6 +26,14 @@
 -spec start_link() -> {ok, pid()} | {error, Error::term()}.
 start_link() ->
     supervisor:start_link({local, ?SERVER}, ?MODULE, []).
+
+-spec status() -> list().
+status() ->
+    lists:foldl(fun(Worker, Acc) ->
+                        [rabl_producer_fsm:status(Worker) | Acc]
+                end,
+                [],
+                rabl_producer_fsm:workers()).
 
 %%%===================================================================
 %%% Supervisor callbacks
