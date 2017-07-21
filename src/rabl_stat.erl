@@ -268,7 +268,8 @@ get_stat({rabl, Stat}=Name, _Type) ->
 uri_to_atom(URI) ->
     {ok, Params} = rabl_amqp:parse_uri(URI),
     Host = rabl_amqp:host(Params),
-    list_to_atom(Host).
+    Host2 = re:replace(Host, "\\.", "_", [global, {return, list}]),
+    list_to_atom("x"++Host2).
 
 %%%===================================================================
 %% TESTS
