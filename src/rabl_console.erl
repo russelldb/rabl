@@ -70,12 +70,11 @@ flatten_stats([Stat | Stats], Acc) ->
     flatten_stats(Stats, [flatten_stat(Stat) | Acc]).
 
 flatten_stat({Name, Stats}) ->
-    lists:foldl(fun({StatName, StatVal}, Acc) ->
-                        Flattened = flatten_stat(Name, StatName, StatVal),
-                        [Flattened | Acc]
-                end,
-                [],
-                Stats).
+    %% @TODO better filter on stats to show
+    [flatten_stat(Name, StatName, StatVal) || {StatName, StatVal} <- Stats,
+                                              lists:member(StatName,
+                                                           [percentile, 50, 75, 90, 95, 99, 999,
+                                                            count, median, min, max])].
 
 -spec flatten_stat(list(), atom(), list() | number()) -> list().
 flatten_stat(Parent, Stat, Val) when is_number(Val) ->

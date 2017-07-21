@@ -16,8 +16,9 @@
 
 %% API
 -export([
-         consume/2,
+         consume/3,
          get_stats/0,
+         params_to_stat_name/1,
          publish/0,
          publish_fail/0,
          riak_put/3,
@@ -59,21 +60,22 @@ start_link() ->
 %%--------------------------------------------------------------------
 -spec publish() -> ok.
 publish() ->
-    folsom_metrics:notify({publish, 1}).
+    folsom_metrics:notify({{rabl, publish}, 1}).
 
 %%--------------------------------------------------------------------
 %% @doc
 %% Called when a consumer recieves an riak_object
 %%%% @end
 %%--------------------------------------------------------------------
--spec consume(erlang:timestamp(), erlang:timestamp()) -> ok.
-consume(PublishTS, ConsumeTS) ->
+-spec consume(atom(), erlang:timestamp(), erlang:timestamp()) -> ok.
+consume(StatName, PublishTS, ConsumeTS) ->
     case timer:now_diff(ConsumeTS, PublishTS) of
         Qlatency when Qlatency < 0 ->
             lager:warning("Negative queue latency, check clocks synchronized."),
             ok;
         Qlatency ->
-            folsom_metrics:notify({queue_latency, Qlatency})
+            folsom_metrics:notify({{rabl, queue_latency}, Qlatency}),
+            folsom_metrics:notify({{rabl, StatName}, Qlatency})
     end.
 
 %%--------------------------------------------------------------------
@@ -83,7 +85,7 @@ consume(PublishTS, ConsumeTS) ->
 %%--------------------------------------------------------------------
 -spec publish_fail() -> ok.
 publish_fail() ->
-    folsom_metrics:notify({publish_fail, 1}).
+    folsom_metrics:notify({{rabl, publish_fail}, 1}).
 
 
 %%--------------------------------------------------------------------
@@ -98,13 +100,13 @@ riak_put(Status, StartTime, EndTime) ->
             lager:warning("Negative put latency on local put."),
             ok;
         PutLatency ->
-            folsom_metrics:notify({put_latency, PutLatency})
+            folsom_metrics:notify({{rabl, put_latency}, PutLatency})
     end,
     case Status of
         fail ->
-            folsom_metrics:notify({consume_fail, 1});
+            folsom_metrics:notify({{rabl, consume_fail}, 1});
         success ->
-            folsom_metrics:notify({consume, 1})
+            folsom_metrics:notify({{rabl, consume}, 1})
     end.
 
 %%--------------------------------------------------------------------
@@ -267,6 +269,10 @@ get_stat({rabl, Stat}=Name, _Type) ->
 -spec uri_to_atom(string()) -> atom().
 uri_to_atom(URI) ->
     {ok, Params} = rabl_amqp:parse_uri(URI),
+    params_to_stat_name(Params).
+
+-spec params_to_stat_name(rabl_amqp:amqp_connection_params()) -> atom().
+params_to_stat_name(Params) ->
     Host = rabl_amqp:host(Params),
     Host2 = re:replace(Host, "\\.", "_", [global, {return, list}]),
     list_to_atom("x"++Host2).

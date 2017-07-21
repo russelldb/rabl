@@ -46,7 +46,8 @@
           connection_monitor,
           reconnect_delay_millis,
           riak_client,
-          subscription_tag
+          subscription_tag,
+          per_q_stat_name
          }).
 
 -define(DEFAULT_RECONN_DELAY_MILLIS, 50).
@@ -79,9 +80,11 @@ status(Worker) ->
 init([AMQPURI]) ->
     {ok, AMQPParams} = rabl_amqp:parse_uri(AMQPURI),
     {ok, RiakClient} = rabl_riak:client_new(),
+    PerQStatName = rabl_stat:params_to_stat_name(AMQPParams),
     ReconnectDelay = application:get_env(rabl, reconnect_delay_millis, ?DEFAULT_RECONN_DELAY_MILLIS),
     {ok, disconnected, #state{amqp_params=AMQPParams,
                               riak_client=RiakClient,
+                              per_q_stat_name=PerQStatName,
                               reconnect_delay_millis=ReconnectDelay}, 0}.
 
 %%--------------------------------------------------------------------
@@ -187,9 +190,11 @@ handle_info(Info, AnyState, State) ->
             lager:info("Cancel message received, stopping~n"),
             {stop, subscription_cancelled, State};
         {rabbit_msg, {msg, Message, Tag}} ->
-            #state{riak_client=Client, channel=Channel} = State,
+            #state{riak_client=Client,
+                   channel=Channel,
+                   per_q_stat_name=StatName} = State,
             {PublishTime, {B, K}, BinObj} = binary_to_term(Message),
-            rabl_stat:consume(PublishTime, Time),
+            rabl_stat:consume(StatName, PublishTime, Time),
 
             Obj = rabl_riak:object_from_binary(B, K, BinObj),
             lager:debug("rabl putting ~p ~p~n", [B, K]),
