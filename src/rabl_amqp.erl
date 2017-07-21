@@ -24,6 +24,10 @@
 parse_uri(AMQPURI) ->
     amqp_uri:parse(AMQPURI).
 
+-spec host(amqp_connection_params()) -> string().
+host(#amqp_params_network{host=Host}) ->
+    Host.
+
 %% @doc connection_start:: start a rabbimq amqp connection, returns a
 %% pid() or error.
 -spec connection_start(amqp_connection_params()) -> {ok, Connection::pid()}

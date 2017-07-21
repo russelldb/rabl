@@ -30,11 +30,10 @@
 
 -define(SERVER, ?MODULE).
 
--type stats() :: [{stat_name(), stat_val()}].
+-type stats() :: [stat()].
+-type stat() :: {stat_name(), stat_val()}.
 -type stat_name() :: atom().
 -type stat_val() :: histogram() | meter().
--type histograms() :: [{stat_name(), histogram()}].
--type meters() :: [{stat_name(), meter()}].
 -type histogram() :: proplists:proplist().
 -type meter() :: proplists:proplist().
 
@@ -151,9 +150,8 @@ init([]) ->
 %% @end
 %%--------------------------------------------------------------------
 handle_call(get_stats, _From, State) ->
-    Histos = get_histograms(),
-    Meters = get_meters(),
-    Reply = {ok, Histos ++ Meters},
+    Stats = get_all_metrics(),
+    Reply = {ok, Stats},
     {reply, Reply, State}.
 
 %%--------------------------------------------------------------------
@@ -214,14 +212,18 @@ code_change(_OldVsn, State, _Extra) ->
 %% @private set up the metrics needed in folsom
 -spec maybe_create_metrics() -> ok | {error, Reason::term()}.
 maybe_create_metrics() ->
-    maybe_create_metrics([
-                          {new_histogram, [queue_latency, slide, 10]},
-                          {new_histogram, [put_latency, slide, 10]},
-                          {new_meter, [publish]},
-                          {new_meter, [consume]},
-                          {new_meter, [publish_fail]},
-                          {new_meter, [consume_fail]}
-                         ]).
+    Consumers = application:get_env(rabl, consumers, []),
+    ConsumerHistograms = [{new_histogram, [{rabl, uri_to_atom(Consumer)}, slide, 10]} ||
+                             {_Cnt, Consumer} <- Consumers],
+    maybe_create_metrics(ConsumerHistograms ++
+                             [
+                              {new_histogram, [{rabl, queue_latency}, slide, 10]},
+                              {new_histogram, [{rabl, put_latency}, slide, 10]},
+                              {new_meter, [{rabl, publish}]},
+                              {new_meter, [{rabl, consume}]},
+                              {new_meter, [{rabl, publish_fail}]},
+                              {new_meter, [{rabl, consume_fail}]}
+                             ]).
 
 -spec maybe_create_metrics(Metrics::[{atom(), atom(), integer()}]) ->
                                   ok | {error, Reason::term()}.
@@ -237,17 +239,36 @@ maybe_create_metrics([{NewFun, Args} | Metrics]) ->
             {error, OtherError}
     end.
 
--spec get_histograms() -> {ok, histograms()}.
-get_histograms() ->
-    [{Name, folsom_metrics:get_histogram_statistics(Name)} ||
-        Name <- [queue_latency, put_latency]].
+-spec get_all_metrics() -> stats().
+get_all_metrics() ->
+    Metrics =  folsom_metrics:get_metrics(),
+    RablStats = lists:foldl(fun({rabl, _Stat}=Name, Acc) ->
+                                    Info = folsom_metrics:get_metric_info(Name),
+                                    Type = proplists:get_value(type, proplists:get_value(Name, Info)),
+                                    [{Name, Type} | Acc];
+                               (_, Acc) -> Acc
+                            end,
+                            [],
+                            Metrics),
+    get_all_metrics(RablStats, []).
 
--spec get_meters() -> {ok, meters()}.
-get_meters() ->
-    [{Name, folsom_metrics:get_metric_value(Name)} ||
-        Name <- [publish_fail, publish, consume_fail, consume]].
+-spec get_all_metrics([{Name::term(), Type::atom()}], Acc::list()) -> stats().
+get_all_metrics([], Acc) ->
+    Acc;
+get_all_metrics([{Name, Type} | Stats], Acc) ->
+    get_all_metrics(Stats, [get_stat(Name, Type)|Acc]).
 
+-spec get_stat(Name::term(), Type::atom()) -> stat().
+get_stat({rabl, Stat}=Name, histogram) ->
+    {Stat, folsom_metrics:get_histogram_statistics(Name)};
+get_stat({rabl, Stat}=Name, _Type) ->
+    {Stat, folsom_metrics:get_metric_value(Name)}.
 
+-spec uri_to_atom(string()) -> atom().
+uri_to_atom(URI) ->
+    {ok, Params} = rabl_amqp:parse_uri(URI),
+    Host = rabl_amqp:host(Params),
+    list_to_atom(Host).
 
 %%%===================================================================
 %% TESTS
