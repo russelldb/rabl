@@ -670,7 +670,9 @@ handles_rabbit_messages() ->
              ],
     meck:expect(rabl_amqp, receive_msg, ['_'], meck:seq(MsgSeq)),
 
-    meck:expect(rabl_stat, consume, ['_', '_'], ok),
+    meck:expect(rabl_stat, params_to_stat_name, ['_'], meck:val(mock_stat_name)),
+
+    meck:expect(rabl_stat, consume, [mock_stat_name, '_', '_'], ok),
     meck:expect(rabl_stat, riak_put, [{[success, '_', '_'], ok},
                                       {[fail, '_', '_'], ok}]),
     meck:expect(rabl_riak, object_from_binary, [B, K, DummyObject], mock_riak_object),

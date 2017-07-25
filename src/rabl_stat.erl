@@ -34,9 +34,9 @@
 -type stats() :: [stat()].
 -type stat() :: {stat_name(), stat_val()}.
 -type stat_name() :: atom().
--type stat_val() :: histogram() | meter().
+-type stat_val() :: histogram() | counter().
 -type histogram() :: proplists:proplist().
--type meter() :: proplists:proplist().
+-type counter() :: integer().
 
 -record(state, {}).
 
@@ -60,7 +60,7 @@ start_link() ->
 %%--------------------------------------------------------------------
 -spec publish() -> ok.
 publish() ->
-    folsom_metrics:notify({{rabl, publish}, 1}).
+    folsom_metrics:notify({rabl, publish}, {inc, 1}).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -74,8 +74,8 @@ consume(StatName, PublishTS, ConsumeTS) ->
             lager:warning("Negative queue latency, check clocks synchronized."),
             ok;
         Qlatency ->
-            folsom_metrics:notify({{rabl, queue_latency}, Qlatency}),
-            folsom_metrics:notify({{rabl, StatName}, Qlatency})
+            folsom_metrics:notify({rabl, queue_latency}, Qlatency),
+            folsom_metrics:notify({rabl, StatName}, Qlatency)
     end.
 
 %%--------------------------------------------------------------------
@@ -100,13 +100,13 @@ riak_put(Status, StartTime, EndTime) ->
             lager:warning("Negative put latency on local put."),
             ok;
         PutLatency ->
-            folsom_metrics:notify({{rabl, put_latency}, PutLatency})
+            folsom_metrics:notify({rabl, put_latency}, PutLatency)
     end,
     case Status of
         fail ->
-            folsom_metrics:notify({{rabl, consume_fail}, 1});
+            folsom_metrics:notify({rabl, consume_fail}, {inc, 1});
         success ->
-            folsom_metrics:notify({{rabl, consume}, 1})
+            folsom_metrics:notify({rabl, consume}, {inc, 1})
     end.
 
 %%--------------------------------------------------------------------
@@ -221,10 +221,10 @@ maybe_create_metrics() ->
                              [
                               {new_histogram, [{rabl, queue_latency}, slide, 10]},
                               {new_histogram, [{rabl, put_latency}, slide, 10]},
-                              {new_meter, [{rabl, publish}]},
-                              {new_meter, [{rabl, consume}]},
-                              {new_meter, [{rabl, publish_fail}]},
-                              {new_meter, [{rabl, consume_fail}]}
+                              {new_counter, [{rabl, publish}]},
+                              {new_counter, [{rabl, consume}]},
+                              {new_counter, [{rabl, publish_fail}]},
+                              {new_counter, [{rabl, consume_fail}]}
                              ]).
 
 -spec maybe_create_metrics(Metrics::[{atom(), atom(), integer()}]) ->
@@ -305,14 +305,14 @@ metrics_test() ->
     assert_stats_survived_crash().
 
 assert_stats_created() ->
-    Expected = lists:sort([consume,publish,queue_latency,put_latency,publish_fail,consume_fail]),
+    Expected = lists:sort([{rabl, Name} || Name <- [consume,publish,queue_latency,put_latency,publish_fail,consume_fail]]),
     ?assertEqual(Expected, lists:sort(folsom_metrics:get_metrics())).
 
 add_stats() ->
-    [folsom_metrics:notify({Name, 1000}) || Name <- [consume, consume_fail, publish_fail, publish]].
+    [folsom_metrics:notify({rabl, Name}, {inc, 1000}) || Name <- [consume, consume_fail, publish_fail, publish]].
 
 assert_stats_survived_crash() ->
     {ok, Stats} = get_stats(),
-    [?assertMatch({Name, [{count, 1000} | _]}, proplists:lookup(Name, Stats)) || Name <- [consume, consume_fail, publish_fail, publish]].
+    [?assertMatch({Name,  1000}, proplists:lookup(Name, Stats)) || Name <- [consume, consume_fail, publish_fail, publish]].
 
 -endif.
