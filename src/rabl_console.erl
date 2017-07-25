@@ -69,7 +69,9 @@ flatten_stats([], Acc) ->
 flatten_stats([Stat | Stats], Acc) ->
     flatten_stats(Stats, [flatten_stat(Stat) | Acc]).
 
-flatten_stat({Name, Stats}) ->
+flatten_stat({Name, Stat}) when is_number(Stat) ->
+    [flatten_stat(Name, count, Stat)];
+flatten_stat({Name, Stats}) when is_list(Stats) ->
     %% @TODO better filter on stats to show
     [flatten_stat(Name, StatName, StatVal) || {StatName, StatVal} <- Stats,
                                               lists:member(StatName,

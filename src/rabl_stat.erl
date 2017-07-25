@@ -275,7 +275,7 @@ uri_to_atom(URI) ->
 params_to_stat_name(Params) ->
     Host = rabl_amqp:host(Params),
     Host2 = re:replace(Host, "\\.", "_", [global, {return, list}]),
-    list_to_atom("x"++Host2).
+    list_to_atom("queue_"++Host2).
 
 %%%===================================================================
 %% TESTS
