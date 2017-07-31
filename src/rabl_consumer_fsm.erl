@@ -99,6 +99,10 @@ init([AMQPURI]) ->
                           {next_state, consumer_state(), #state{}, timeout()} |
                           {stop, Reason::atom(), #state{}}.
 disconnected(timeout, State) ->
+    lager:info("timeout in state disconnected"),
+    connect(State);
+disconnected(connect_timeout, State) ->
+    lager:info("connect_timeout in state disconnected"),
     connect(State).
 
 %%--------------------------------------------------------------------
@@ -110,7 +114,8 @@ disconnected(timeout, State) ->
                        {next_state, consumer_state(), #state{}} |
                        {next_state, consumer_state(), #state{}, timeout()} |
                        {stop, Reason::atom(), #state{}}.
-unsubscribed(timeout, State) ->
+unsubscribed(connect_timeout, State) ->
+    lager:info("connect_timeout in state unsubscribed"),
     subscribe(State).
 
 %%--------------------------------------------------------------------
@@ -181,6 +186,8 @@ handle_info({'DOWN', ConnMonRef, process, Connection, Reason},
             State=#state{connection_monitor=ConnMonRef, connection=Connection}) ->
     lager:error("Connection Down with reason ~p~n", [Reason]),
     connect(State);
+handle_info(connect_timeout, StateName, State) ->
+    ?MODULE:StateName(connect_timeout, State);
 handle_info(Info, AnyState, State) ->
     %% TODO implement throttle here?
     Time = os:timestamp(),
@@ -266,8 +273,11 @@ connect(State) ->
     PrefetchCount = application:get_env(rabl, prefetch_count, ?DEFAULT_PREFETCH),
     Delay2 = backoff(Delay),
 
+    lager:info("connection ~p of ~p with delay ~p", [CAC, MaxRetries, Delay]),
+
     case CAC >= MaxRetries of
         true ->
+            lager:info("Giving up and dying"),
             {stop, max_connection_retry_limit_reached, State};
         false ->
             case rabl_amqp:connection_start(AMQPParams) of
@@ -276,7 +286,6 @@ connect(State) ->
                     case rabl_amqp:channel_open(Connection) of
                         {ok, Channel} ->
                             ChanMonRef = erlang:monitor(process, Channel),
-                            %% @TODO magic number
                             ok = rabl_amqp:set_prefetch_count(Channel, PrefetchCount),
                             subscribe(State#state{channel=Channel,
                                                   channel_monitor=ChanMonRef,
@@ -291,13 +300,15 @@ connect(State) ->
                             lager:error("Error ~p opening a channel on connection with params ~p~n", [ChannelOpenError, AMQPParams]),
                             erlang:demonitor(ConnMonRef, [flush]),
                             ok = rabl_amqp:connection_close(Connection),
+                            erlang:send_after(Delay, self(), connect_timeout),
                             {next_state, disconnected, State#state{reconnect_delay_millis=Delay2,
-                                                                   connection_attempt_counter=CAC+1}, Delay}
+                                                                   connection_attempt_counter=CAC+1}}
                     end;
                 {error, ConnectionOpenError} ->
                     lager:error("Error ~p connecting with params ~p~n", [ConnectionOpenError, AMQPParams]),
+                    erlang:send_after(Delay, self(), connect_timeout),
                     {next_state, disconnected, State#state{reconnect_delay_millis=Delay2,
-                                                           connection_attempt_counter=CAC+1}, Delay}
+                                                           connection_attempt_counter=CAC+1}}
             end
     end.
 
@@ -333,17 +344,20 @@ subscribe(State) ->
             try rabl_amqp:subscribe(Channel, SinkQueue, self()) of
                 {ok, Tag} ->
                     State2 = State#state{subscription_tag=Tag},
+                    lager:info("consumer ready"),
                     {next_state, consuming, State2};
                 Error ->
                     lager:error("Error ~p subscribing to ~p ~n", [Error, SinkQueue]),
                     Delay2 = backoff(Delay),
+                    erlang:send_after(Delay, self(), connect_timeout),
                     {next_state, unsubscribed, State#state{reconnect_delay_millis=Delay2,
-                                                           connection_attempt_counter=CAC+1}, Delay}
+                                                           connection_attempt_counter=CAC+1}}
             catch exit:Ex when is_tuple(Ex) andalso element(1, Ex) == noproc ->
                     %% connection | channel busted, destroy and start
                     %% over
                     disconnect(State),
-                    {next_state, disconnected, State, 0}
+                    erlang:send_after(0, self(), connect_timeout),
+                    {next_state, disconnected, State}
             end
     end.
 
