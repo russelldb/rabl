@@ -567,6 +567,7 @@ publish_connected_test() ->
     load_producer(),
 
     meck:new(rabl_amqp, [passthrough]),
+    meck:new(rabl_util, [passthrough]),
     Pid = self(),
     meck:expect(rabl_amqp, connection_start, fun(_) ->
                                                      {ok, rabl_mock:mock_rabl_con(Pid)}
@@ -575,10 +576,13 @@ publish_connected_test() ->
                                                  {ok, rabl_mock:mock_rabl_chan(Pid)}
                                          end),
 
+    meck:expect(rabl_util, try_ensure_exchange, ['_', ClusterName], meck:val(ok)),
+
     {ok, Producer} = start_link(hd(?GENERATED_MOD:workers()), "amqp://localhost"),
     unlink(Producer),
 
     Channel = rabl_mock:receive_channel(Pid),
+
     %% match the expect on real arguments
     meck:expect(rabl_amqp, publish, [Channel, ClusterName, ClusterName, <<"test">>],
                 meck:val(ok)),
@@ -586,7 +590,9 @@ publish_connected_test() ->
     PubRes = publish(<<"test">>),
     ?assertEqual(ok, PubRes),
     meck:validate(rabl_amqp),
+    meck:validate(rabl_util),
     meck:unload(rabl_amqp),
+    meck:unload(rabl_util),
     %% @TODO do it better, please.
     exit(Producer, kill),
     ok.
@@ -604,6 +610,7 @@ publish_disconnected_test() ->
     load_producer(),
 
     meck:new(rabl_amqp, [passthrough]),
+    meck:new(rabl_util, [passthrough]),
     Pid = self(),
     meck:expect(rabl_amqp, connection_start, ['_'], meck:seq([meck:exec(fun(_) -> {ok, rabl_mock:mock_rabl_con(Pid)} end),
                                                               meck:val({error, nope}),
@@ -612,6 +619,8 @@ publish_disconnected_test() ->
     meck:expect(rabl_amqp, channel_open, fun(_) ->
                                                  {ok, rabl_mock:mock_rabl_chan(Pid)}
                                          end),
+
+    meck:expect(rabl_util, try_ensure_exchange, ['_', ClusterName], meck:val(ok)),
 
     {ok, Producer} = start_link(hd(?GENERATED_MOD:workers()), "amqp://localhost"),
     unlink(Producer),
@@ -632,6 +641,8 @@ publish_disconnected_test() ->
 
     meck:validate(rabl_amqp),
     meck:unload(rabl_amqp),
+    meck:validate(rabl_util),
+    meck:unload(rabl_util),
 
     ok.
 

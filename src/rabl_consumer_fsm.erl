@@ -453,6 +453,7 @@ reopen_closed_connections() ->
     rabl_env_setup(),
     mock_riak(),
     meck:new(rabl_amqp, [passthrough]),
+    meck:new(rabl_util, [passthrough]),
     Pid = self(),
     meck:expect(rabl_amqp, connection_start, fun(_) ->
                                                      {ok, rabl_mock:mock_rabl_con(Pid)}
@@ -462,6 +463,7 @@ reopen_closed_connections() ->
                                                  {ok, rabl_mock:mock_rabl_chan(Pid)}
                                          end),
 
+    meck:expect(rabl_util, try_ensure_exchange, ['_', '_'], meck:val(ok)),
     meck:expect(rabl_amqp, set_prefetch_count, ['_', '_'], meck:val(ok)),
     meck:expect(rabl_amqp, subscribe, ['_', '_', '_'], meck:val({ok, <<"subscription">>})),
 
@@ -496,7 +498,10 @@ reopen_closed_connections() ->
 
     exit(Consumer, kill),
 
+    meck:validate(rabl_amqp),
     meck:unload(rabl_amqp),
+    meck:validate(rabl_util),
+    meck:unload(rabl_util),
     unmock_riak().
 
 reopen_closed_channels() ->
@@ -591,6 +596,7 @@ fail_on_max_subscribe_errors() ->
     rabl_env_setup(),
     mock_riak(),
     meck:new(rabl_amqp, [passthrough]),
+    meck:new(rabl_util, [passthrough]),
     Pid = self(),
     meck:expect(rabl_amqp, connection_start, fun(_) ->
                                                      {ok, rabl_mock:mock_rabl_con(Pid)}
@@ -600,6 +606,7 @@ fail_on_max_subscribe_errors() ->
                                                  {ok, rabl_mock:mock_rabl_chan(Pid)}
                                          end),
     meck:expect(rabl_amqp, channel_close, ['_'], meck:val(ok)),
+    meck:expect(rabl_util, try_ensure_exchange, ['_', '_'], meck:val(ok)),
     meck:expect(rabl_amqp, set_prefetch_count, ['_', '_'], meck:val(ok)),
     meck:expect(rabl_amqp, subscribe, ['_', '_', '_'], meck:val({error, subscribe_fail})),
 
@@ -613,13 +620,17 @@ fail_on_max_subscribe_errors() ->
     wait_for_message({'DOWN', Mon, process, Consumer, max_subscribe_retry_limit_reached}),
 
     ?assertMatch(undefined, process_info(Consumer)),
+    meck:validate(rabl_amqp),
     meck:unload(rabl_amqp),
+    meck:validate(rabl_util),
+    meck:unload(rabl_util),
     unmock_riak().
 
 subscribe_noproc_reconnects() ->
     rabl_env_setup(),
     mock_riak(),
     meck:new(rabl_amqp, [passthrough]),
+    meck:new(rabl_util, [passthrough]),
     Pid = self(),
     meck:expect(rabl_amqp, connection_start, fun(_) ->
                                                      {ok, rabl_mock:mock_rabl_con(Pid)}
@@ -629,6 +640,7 @@ subscribe_noproc_reconnects() ->
                                                  {ok, rabl_mock:mock_rabl_chan(Pid)}
                                          end),
     meck:expect(rabl_amqp, channel_close, ['_'], meck:val(ok)),
+    meck:expect(rabl_util, try_ensure_exchange, ['_', '_'], meck:val(ok)),
     meck:expect(rabl_amqp, set_prefetch_count, ['_', '_'], meck:val(ok)),
     meck:expect(rabl_amqp, subscribe, ['_', '_', '_'],
                 meck:seq([
@@ -646,7 +658,10 @@ subscribe_noproc_reconnects() ->
     ?assertMatch(ok, meck:wait(1, rabl_amqp, connection_close, ['_'], 5000)),
     ?assertMatch(ok, meck:wait(1, rabl_amqp, channel_close, ['_'], 5000)),
     exit(Consumer, kill),
+    meck:validate(rabl_amqp),
     meck:unload(rabl_amqp),
+    meck:validate(rabl_util),
+    meck:unload(rabl_util),
     unmock_riak().
 
 %% Test that the handle_info for messages sent by rabbitmq does what
@@ -700,7 +715,11 @@ handles_rabbit_messages() ->
     ?assert(meck:validate(rabl_riak)),
     ?assert(meck:validate(rabl_amqp)),
     ?assert(meck:validate(rabl_stat)),
+    meck:validate(rabl_amqp),
     meck:unload(rabl_amqp),
+    meck:validate(rabl_util),
+    meck:unload(rabl_util),
+    meck:validate(rabl_stat),
     meck:unload(rabl_stat),
     unmock_riak().
 
@@ -730,6 +749,7 @@ mock_riak() ->
 good_rabbit_mocks() ->
     Pid = self(),
     meck:new(rabl_amqp, [passthrough]),
+    meck:new(rabl_util, [passthrough]),
     meck:expect(rabl_amqp, connection_start, fun(_) ->
                                                      {ok, rabl_mock:mock_rabl_con(Pid)}
                                              end),
@@ -739,6 +759,7 @@ good_rabbit_mocks() ->
                                          end),
     meck:expect(rabl_amqp, channel_close, ['_'], meck:val(ok)),
     meck:expect(rabl_amqp, set_prefetch_count, ['_', '_'], meck:val(ok)),
+    meck:expect(rabl_util, try_ensure_exchange, ['_', '_'], meck:val(ok)),
     meck:expect(rabl_amqp, subscribe, ['_', '_', '_'], meck:val({ok, <<"subscription">>})).
 
 flush() ->

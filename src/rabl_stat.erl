@@ -316,7 +316,7 @@ metrics_test() ->
     assert_stats_survived_crash().
 
 assert_stats_created() ->
-    Expected = lists:sort([{rabl, Name} || Name <- [consume,publish,queue_latency,put_latency,publish_fail,consume_fail]]),
+    Expected = lists:sort([{rabl, Name} || Name <- [consume,publish,queue_latency,put_latency,publish_fail,consume_fail, return]]),
     ?assertEqual(Expected, lists:sort(folsom_metrics:get_metrics())).
 
 add_stats() ->
