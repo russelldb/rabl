@@ -9,7 +9,7 @@
 
 -compile(export_all).
 
--export_type([client/0, object/0]).
+-export_type([client/0, object/0, bucket/0, key/0]).
 
 %% we don't depend on riak_kv, but can only be run inside a riak node
 -ignore_xref({riak, local_client, 0}).
@@ -17,8 +17,8 @@
 
 -opaque client() :: riak_client:riak_client().
 -opaque object() :: riak_object:riak_object().
--type bucket() :: riak_object:bucket().
--type key() :: riak_object:key().
+-opaque bucket() :: riak_object:bucket().
+-opaque key() :: riak_object:key().
 
 %% @doc create a new client. Uses app config to connect. Returns `{ok,
 %% Client}' where C is an opaque term to be used for other functions.

@@ -21,6 +21,7 @@
          params_to_stat_name/1,
          publish/0,
          publish_fail/0,
+         return/0,
          riak_put/3,
          start_link/0
         ]).
@@ -86,6 +87,15 @@ consume(StatName, PublishTS, ConsumeTS) ->
 -spec publish_fail() -> ok.
 publish_fail() ->
     folsom_metrics:notify({{rabl, publish_fail}, 1}).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Called when a producer gets a return message
+%%%% @end
+%%--------------------------------------------------------------------
+-spec return() -> ok.
+return() ->
+    folsom_metrics:notify({{rabl, return}, 1}).
 
 
 %%--------------------------------------------------------------------
@@ -224,7 +234,8 @@ maybe_create_metrics() ->
                               {new_counter, [{rabl, publish}]},
                               {new_counter, [{rabl, consume}]},
                               {new_counter, [{rabl, publish_fail}]},
-                              {new_counter, [{rabl, consume_fail}]}
+                              {new_counter, [{rabl, consume_fail}]},
+                              {new_counter, [{rabl, return}]}
                              ]).
 
 -spec maybe_create_metrics(Metrics::[{atom(), atom(), integer()}]) ->

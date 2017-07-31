@@ -214,7 +214,7 @@ disconnected({publish, Msg}, _From, State) ->
     end.
 
 %% info callbacks
-%% Called when a the channel exits
+%% Called when the channel exits
 handle_info({'EXIT', Channel, Reason}, _AnyState, State=#state{channel=Channel}) ->
     lager:error("Rabbit Connection Exited with reason ~p", [Reason]),
     case connect(State) of
@@ -236,7 +236,13 @@ handle_info(connect_timeout, connected, State) ->
     %% reconnect.
     {next_state, connected, State};
 handle_info(Other, AnyState, State) ->
-    lager:warning("Unexpected Info message ~p~n", [Other]),
+    case rabl_amqp:receive_return(Other) of
+        {rabbit_return, Reason, Msg} ->
+            rabl_stat:return(),
+            log_return(Msg, Reason);
+        false ->
+            lager:debug("Unexpected Info message ~p~n", [Other])
+    end,
     {next_state, AnyState, State}.
 
 handle_event(_Event, AnyState, State) ->
@@ -275,7 +281,8 @@ disconnect(Connection, Channel) ->
 connect(State) ->
     #state{connection_attempt_counter=CAC,
            reconnect_delay_millis=Delay0,
-           amqp_params=AMQPParams} = State,
+           amqp_params=AMQPParams,
+           queue=Queue} = State,
     {ok, MaxRetries} = application:get_env(rabl, max_connection_retries),
     case CAC >= MaxRetries of
         true ->
@@ -290,14 +297,15 @@ connect(State) ->
                                 reconnect_delay_millis=ResetDelay}};
         false ->
             %% try and reconnect, schedule a retry on fail
-            case start_link_channel(AMQPParams) of
+            case start_link_channel(AMQPParams, Queue) of
                 {ok, Channel, Connection} ->
                     ResetDelay = default_reconnect_delay(),
-                    {true, State#state{channel=Channel,
-                                       connection=Connection,
-                                       connection_start_time=os:timestamp(),
-                                       connection_attempt_counter=0,
-                                       reconnect_delay_millis=ResetDelay}};
+                    NewState = State#state{channel=Channel,
+                                           connection=Connection,
+                                           connection_start_time=os:timestamp(),
+                                           connection_attempt_counter=0,
+                                           reconnect_delay_millis=ResetDelay},
+                    {true, NewState};
                 {error, Error} ->
                     lager:error("Connection error ~p for ~p", [Error, AMQPParams]),
                     erlang:send_after(Delay0, self(), connect_timeout),
@@ -322,23 +330,35 @@ default_reconnect_delay() ->
     application:get_env(rabl, reconnect_delay_millis,
                         ?DEFAULT_RECONN_DELAY_MILLIS).
 
+%% @private log a return message
+log_return(Msg, Reason) ->
+    case rabl_codec:decode(Msg) of
+        {Time, BK, _Obj} ->
+            lager:warning("Replication message for ~p at ~p returned with reason ~p", [BK, Time, Reason]);
+        {error, DecError} ->
+            lager:error("Replication message returned with reason ~p, unable to decode msg with error ~p",
+                        [Reason, DecError])
+    end.
 
 %% @private start_link_channel attempts to start a connection, and
 %% open an a channel, and link to it, if successful it returns the
 %% linked channel pid
--spec start_link_channel(rabl_amqp:amqp_connection_params()) ->
+-spec start_link_channel(rabl_amqp:amqp_connection_params(), Queue::binary()) ->
                                 {ok, Channel::pid()} |
                                 {error, Error::term()}.
-start_link_channel(AMQPParams) ->
+start_link_channel(AMQPParams, Queue) ->
     case rabl_amqp:connection_start(AMQPParams) of
         {ok, Connection} ->
             link(Connection),
             case rabl_amqp:channel_open(Connection) of
                 {ok, Channel} ->
                     link(Channel),
+                    rabl_amqp:register_return_handler(Channel, self()),
+                    rabl_util:try_ensure_exchange(Channel, Queue),
                     {ok, Channel, Connection};
                 Error ->
                     unlink(Connection),
+                    rabl_amqp:connection_close(Connection),
                     {error, Error}
             end;
         Error ->

@@ -37,6 +37,20 @@ put(Bucket, Key, Value) ->
     ok = rabl_riak:client_put(C, Obj, []),
     ok.
 
+%% @doc don't crash of fail if you can't create the machinery,
+%% that will happen later anyway.
+-spec try_ensure_exchange(Channel::pid(), Queue::binary()) -> ok.
+try_ensure_exchange(Channel, Queue) ->
+    try
+        rabl_amqp:exchange_create(Channel, Queue),
+        rabl_amqp:queue_create(Channel, Queue),
+        rabl_amqp:bind(Channel, Queue, Queue, Queue),
+        lager:debug("Maybe created exchange and queue ~p", [Queue])
+    catch Class:Ex ->
+            lager:error("failed to create exchange etc with ~p ~p",
+                        [Class, Ex])
+    end.
+
 %% sets up exchange, queue, bindings locally for a smoke test NOTE:
 %% run before starting the app.
 setup_local_smoke() ->
@@ -54,6 +68,7 @@ setup_queues(_Queue, []) ->
 setup_queues(Queue, [{_Cnt, URI} | Rest]) ->
     setup_queue(Queue, URI),
     setup_queues(Queue, Rest).
+
 
 setup_queue(Queue, AMQPURI) ->
     {ok, AMQPParams} = rabl_amqp:parse_uri(AMQPURI),

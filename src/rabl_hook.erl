@@ -34,7 +34,7 @@ rablicate(Object) ->
     BK = {riak_object:bucket(Object), riak_object:key(Object)},
     BinObj = riak_object:to_binary(v1, Object),
     Time = os:timestamp(),
-    Msg = term_to_binary({Time, BK, BinObj}),
+    Msg = rabl_codec:encode(Time, BK, BinObj),
     lager:debug("rablicating ~p~n", [BK]),
     Res = case rabl_producer_fsm:publish(Msg) of
               ok ->

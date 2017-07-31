@@ -12,10 +12,11 @@
 
 -compile(export_all).
 
--export_type([amqp_connection_params/0, rabbit_message/0]).
+-export_type([amqp_connection_params/0, rabbit_message/0, rabbit_return_message/0]).
 
 -opaque amqp_connection_params() :: #amqp_params_network{} | #amqp_params_direct{}.
--opaque rabbit_message() :: #'basic.consume_ok'{} | #'basic.cancel_ok'{} | #'basic.deliver'{}.
+-opaque rabbit_message() :: #'basic.consume_ok'{} | #'basic.cancel_ok'{} | #'basic.deliver'{} | term().
+-opaque rabbit_return_message() :: {#'basic.return'{}, #amqp_msg{}} | term().
 
 %% @doc parse the given `AMQPURI' into an opaque term that can be
 %% passed back to `connection_start/1'
@@ -87,6 +88,21 @@ receive_msg({#'basic.deliver'{delivery_tag = Tag}, #'amqp_msg'{payload=Content}}
 receive_msg(Other) ->
     {other, Other}.
 
+%% @doc receive_msg encapsulate rabbitmq specific matching
+-spec receive_return(Msg::rabbit_return_message()) ->
+                            {rabbit_return, no_route | other, Payload::binary()} |
+                            {other, Msg::term()}.
+receive_return({#'basic.return'{reply_code=312}, #amqp_msg{payload=Payload}}) ->
+    {rabbit_return, no_route, Payload};
+receive_return({#'basic.return'{}, #amqp_msg{payload=Payload}}) ->
+    {rabbit_return, other, Payload};
+receive_return(Other) ->
+    {other, Other}.
+
+-spec register_return_handler(Channel::pid(), Handler::pid()) -> ok.
+register_return_handler(Channel, Handler) ->
+    amqp_channel:register_return_handler(Channel, Handler).
+
 -spec ack_msg(Channel::pid(), Tag::term()) -> ok.
 ack_msg(Channel, Tag) when is_pid(Channel) ->
     amqp_channel:cast(Channel, #'basic.ack'{delivery_tag = Tag}).
@@ -106,7 +122,12 @@ publish(Channel, Exchange, RoutingKey, Message) when is_pid(Channel),
                                                      is_binary(Exchange),
                                                      is_binary(RoutingKey),
                                                      is_binary(Message) ->
-    Publish = #'basic.publish'{exchange = Exchange, routing_key = RoutingKey},
+    Publish = #'basic.publish'{exchange = Exchange, routing_key = RoutingKey,
+                                %% this means, "tell me if the
+                                %% RoutingKey doesn't exist" but not
+                                %% the exchange, curiously!
+                               mandatory = true
+                              },
     amqp_channel:cast(Channel, Publish, #amqp_msg{payload = Message}),
     ok.
 
@@ -116,7 +137,6 @@ queue_create(Channel, Queue) when is_pid(Channel), is_binary(Queue) ->
     Declare = #'queue.declare'{queue = Queue},
     #'queue.declare_ok'{} = amqp_channel:call(Channel, Declare),
     {ok, Queue}.
-
 
 -spec exchange_create(pid(), binary()) -> {ok, binary()}.
 exchange_create(Channel, Name) when is_binary(Name), is_pid(Channel) ->

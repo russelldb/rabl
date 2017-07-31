@@ -324,6 +324,8 @@ subscribe(State) ->
     {ok, SinkQueue} = application:get_env(rabl, sink_queue),
     {ok, MaxRetries} = application:get_env(rabl, max_connection_retries),
 
+    rabl_util:try_ensure_exchange(Channel, SinkQueue),
+
     case CAC >= MaxRetries of
         true ->
             {stop, max_subscribe_retry_limit_reached, State};
