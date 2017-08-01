@@ -10,18 +10,20 @@
 -compile(export_all).
 
 -spec encode(erlang:timestamp(), rabl_riak:bk(), binary()) ->
-                    binary().
+                    {ok, binary()}.
 encode(Time, BK, BinObj) ->
-    binary_to_term({Time, BK, BinObj}).
+    Bin = term_to_binary({Time, BK, BinObj}),
+    {ok, Bin}.
 
 -spec decode(binary()) ->
-                    {erlang:timestamp(),
+                    {ok, {erlang:timestamp(),
                      {rabl_riak:bucket(), rabl_riak:key()},
-                     BinObj::binary()}.
+                     BinObj::binary()}} |
+                    {error, Reason::term()}.
 decode(Binary) ->
     try
-        {Time, BK, BinObj} = term_to_binary(Binary),
-        {Time, BK, BinObj}
+        {Time, BK, BinObj} = binary_to_term(Binary),
+        {ok, {Time, BK, BinObj}}
     catch _A:B ->
             {error, B}
     end.

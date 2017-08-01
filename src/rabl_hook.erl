@@ -21,20 +21,15 @@
 
 -compile(export_all).
 
-%% we don't depend on riak_kv, but can only be run inside a riak node
--ignore_xref({riak_object, bucket, 1}).
--ignore_xref({riak_object, key, 1}).
--ignore_xref({riak_object, to_binary, 2}).
-
 %% Simpliest thing that could work.
--spec rablicate(riak_object:riak_object()) -> ok |
+-spec rablicate(rabl_riak:riak_object()) -> ok |
                                               {fail, Reason::term()}.
 rablicate(Object) ->
     lager:debug("rabl hook called~n"),
-    BK = {riak_object:bucket(Object), riak_object:key(Object)},
-    BinObj = riak_object:to_binary(v1, Object),
+    BK = rabl_riak:object_bk(Object),
+    BinObj = rabl_riak:object_to_binary(Object),
     Time = os:timestamp(),
-    Msg = rabl_codec:encode(Time, BK, BinObj),
+    {ok, Msg} = rabl_codec:encode(Time, BK, BinObj),
     lager:debug("rablicating ~p~n", [BK]),
     Res = case rabl_producer_fsm:publish(Msg) of
               ok ->

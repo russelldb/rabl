@@ -33,7 +33,7 @@ load() ->
 put(Bucket, Key, Value) ->
     {ok, C} = rabl_riak:client_new(),
     %% @TODO: dependancy on riak_kv/riak_object
-    Obj = riak_object:new(Bucket, Key, Value),
+    Obj = rabl_riak:object_new(Bucket, Key, Value),
     ok = rabl_riak:client_put(C, Obj, []),
     ok.
 

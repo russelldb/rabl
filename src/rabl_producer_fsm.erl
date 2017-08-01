@@ -98,7 +98,7 @@ start_link(Name, AMQPURI) ->
 %% Publish a replication message
 %% @end
 %%--------------------------------------------------------------------
--spec publish(Msg::binary()) -> ok.
+-spec publish(Msg::binary()) -> ok | {error, Reason::term()}.
 publish(Msg) ->
     case get_worker() of
         {error, no_workers} ->
@@ -240,7 +240,7 @@ handle_info(Other, AnyState, State) ->
         {rabbit_return, Reason, Msg} ->
             rabl_stat:return(),
             log_return(Msg, Reason);
-        false ->
+        {other, _} ->
             lager:debug("Unexpected Info message ~p~n", [Other])
     end,
     {next_state, AnyState, State}.
@@ -333,7 +333,7 @@ default_reconnect_delay() ->
 %% @private log a return message
 log_return(Msg, Reason) ->
     case rabl_codec:decode(Msg) of
-        {Time, BK, _Obj} ->
+        {ok, {Time, BK, _Obj}} ->
             lager:warning("Replication message for ~p at ~p returned with reason ~p", [BK, Time, Reason]);
         {error, DecError} ->
             lager:error("Replication message returned with reason ~p, unable to decode msg with error ~p",

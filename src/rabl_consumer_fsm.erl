@@ -200,25 +200,33 @@ handle_info(Info, AnyState, State) ->
             #state{riak_client=Client,
                    channel=Channel,
                    per_q_stat_name=StatName} = State,
-            {PublishTime, {B, K}, BinObj} = binary_to_term(Message),
-            rabl_stat:consume(StatName, PublishTime, Time),
 
-            Obj = rabl_riak:object_from_binary(B, K, BinObj),
-            lager:debug("rabl putting ~p ~p~n", [B, K]),
-            StartPut = os:timestamp(),
-            case rabl_riak:client_put(Client, Obj, ?RABL_PUT_OPTS) of
-                ok ->
-                    EndPut = os:timestamp(),
-                    %% @TODO something about channel/ack failures
-                    ok = rabl_amqp:ack_msg(Channel, Tag),
-                    rabl_stat:riak_put(success, StartPut, EndPut);
-                Error ->
-                    %% @TODO (consider client timeouts | overload etc
-                    %% here. eg SLEEP if overload?)
-                    ok = rabl_amqp:nack_msg(Channel, Tag),
-                    EndPut = os:timestamp(),
-                    rabl_stat:riak_put(fail, StartPut, EndPut),
-                    lager:error("Failed to consume replicated object ~p ~p with Error ~p", [B, K, Error])
+            case rabl_codec:decode(Message) of
+                {ok, {PublishTime, {B, K}, BinObj}} ->
+                    rabl_stat:consume(StatName, PublishTime, Time),
+
+                    Obj = rabl_riak:object_from_binary(B, K, BinObj),
+                    lager:debug("rabl putting ~p ~p~n", [B, K]),
+                    StartPut = os:timestamp(),
+                    case rabl_riak:client_put(Client, Obj, ?RABL_PUT_OPTS) of
+                        ok ->
+                            EndPut = os:timestamp(),
+                            %% @TODO something about channel/ack failures
+                            ok = rabl_amqp:ack_msg(Channel, Tag),
+                            rabl_stat:riak_put(success, StartPut, EndPut);
+                        Error ->
+                            %% @TODO (consider client timeouts | overload etc
+                            %% here. eg SLEEP if overload?)
+                            ok = rabl_amqp:nack_msg(Channel, Tag),
+                            EndPut = os:timestamp(),
+                            rabl_stat:riak_put(fail, StartPut, EndPut),
+                            lager:error("Failed to consume replicated object ~p ~p with Error ~p", [B, K, Error])
+                    end;
+                {error, Reason} ->
+                    lager:error("Failed to decode message ~p with ~p", [Message, Reason]),
+                    rabl_stat:decode_error(),
+                    %% @TODO NACK or ACK??
+                    ok = rabl_amqp:nack_msg(Channel, Tag)
             end,
             {next_state, AnyState, State};
         OtherInfo ->

@@ -13,11 +13,11 @@
 -include_lib("eunit/include/eunit.hrl").
 -endif.
 
--spec show_config(list()) -> proplists:proplist().
+-spec show_config(list()) -> ok.
 show_config([]) ->
     io:format("rabl env: ~p~n", [application:get_all_env(rabl)]).
 
--spec add_hook([binary()]) -> proplists:proplist().
+-spec add_hook(list()) -> ok.
 add_hook([Bucket]) ->
     BinBucket = list_to_binary(Bucket),
     io:format("adding rabl_hook to bucket ~p~n", [BinBucket]),

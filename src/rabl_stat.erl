@@ -17,6 +17,7 @@
 %% API
 -export([
          consume/3,
+         decode_error/0,
          get_stats/0,
          params_to_stat_name/1,
          publish/0,
@@ -90,6 +91,15 @@ publish_fail() ->
 
 %%--------------------------------------------------------------------
 %% @doc
+%% Called when a consumer fails to decode a rabl message
+%%%% @end
+%%--------------------------------------------------------------------
+-spec decode_error() -> ok.
+decode_error() ->
+    folsom_metrics:notify({{rabl, decode_error}, 1}).
+
+%%--------------------------------------------------------------------
+%% @doc
 %% Called when a producer gets a return message
 %%%% @end
 %%--------------------------------------------------------------------
@@ -124,7 +134,7 @@ riak_put(Status, StartTime, EndTime) ->
 %% Get the stats
 %%%% @end
 %%--------------------------------------------------------------------
--spec get_stats() -> stats().
+-spec get_stats() -> {ok, stats()}.
 get_stats() ->
     gen_server:call(?MODULE, get_stats, 5000).
 
@@ -235,10 +245,11 @@ maybe_create_metrics() ->
                               {new_counter, [{rabl, consume}]},
                               {new_counter, [{rabl, publish_fail}]},
                               {new_counter, [{rabl, consume_fail}]},
-                              {new_counter, [{rabl, return}]}
+                              {new_counter, [{rabl, return}]},
+                              {new_counter, [{rabl, decode_error}]}
                              ]).
 
--spec maybe_create_metrics(Metrics::[{atom(), atom(), integer()}]) ->
+-spec maybe_create_metrics(Metrics::[{NewMetricFun::atom(), MetricSpec::list()}]) ->
                                   ok | {error, Reason::term()}.
 maybe_create_metrics([]) ->
     ok;
@@ -316,14 +327,26 @@ metrics_test() ->
     assert_stats_survived_crash().
 
 assert_stats_created() ->
-    Expected = lists:sort([{rabl, Name} || Name <- [consume,publish,queue_latency,put_latency,publish_fail,consume_fail, return]]),
+    Expected = lists:sort([{rabl, Name} || Name <- [consume,
+                                                    publish,
+                                                    queue_latency,
+                                                    put_latency,
+                                                    publish_fail,
+                                                    consume_fail,
+                                                    return,
+                                                    decode_error]]),
     ?assertEqual(Expected, lists:sort(folsom_metrics:get_metrics())).
 
 add_stats() ->
-    [folsom_metrics:notify({rabl, Name}, {inc, 1000}) || Name <- [consume, consume_fail, publish_fail, publish]].
+    [folsom_metrics:notify({rabl, Name}, {inc, 1000}) || Name <- [consume, consume_fail, publish_fail, publish, return, decode_error]].
 
 assert_stats_survived_crash() ->
     {ok, Stats} = get_stats(),
-    [?assertMatch({Name,  1000}, proplists:lookup(Name, Stats)) || Name <- [consume, consume_fail, publish_fail, publish]].
+    [?assertMatch({Name,  1000}, proplists:lookup(Name, Stats)) || Name <-[consume,
+                                                                           publish,
+                                                                           publish_fail,
+                                                                           consume_fail,
+                                                                           return,
+                                                                           decode_error]].
 
 -endif.

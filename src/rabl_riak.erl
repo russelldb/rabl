@@ -9,16 +9,21 @@
 
 -compile(export_all).
 
--export_type([client/0, object/0, bucket/0, key/0]).
+-export_type([client/0, object/0, bucket/0, key/0, bk/0]).
 
 %% we don't depend on riak_kv, but can only be run inside a riak node
 -ignore_xref({riak, local_client, 0}).
 -ignore_xref({riak_object, from_binary, 3}).
+-ignore_xref({riak_object, new, 3}).
+-ignore_xref({riak_object, bucket, 1}).
+-ignore_xref({riak_object, key, 1}).
+-ignore_xref({riak_object, to_binary, 2}).
 
 -opaque client() :: riak_client:riak_client().
 -opaque object() :: riak_object:riak_object().
 -opaque bucket() :: riak_object:bucket().
 -opaque key() :: riak_object:key().
+-opaque bk() :: {bucket(), key()}.
 
 %% @doc create a new client. Uses app config to connect. Returns `{ok,
 %% Client}' where C is an opaque term to be used for other functions.
@@ -50,4 +55,19 @@ get_bucket(Client, Bucket) ->
 object_from_binary(B, K, BinObj) when is_binary(BinObj) ->
     riak_object:from_binary(B, K, BinObj).
 
+%% @doc bridge to riak_object code, take a riak object and binary
+%% encode it.
+-spec object_to_binary(object()) -> binary().
+object_to_binary(Object) ->
+    riak_object:to_binary(v1, Object).
+
+%% @doc make a new riak_object
+-spec object_new(bucket(), key(), binary()) -> object().
+object_new(Bucket, Key, Value) ->
+    riak_object:new(Bucket, Key, Value).
+
+%% @doc return an opaque `bk' for the given object
+-spec object_bk(rabl_riak:object()) -> rabl_riak:bk().
+object_bk(Object) ->
+    {riak_object:bucket(Object), riak_object:key(Object)}.
 
