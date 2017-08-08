@@ -1,0 +1,13 @@
+digraph rabl  {
+      node [shape=plaintext];
+      edge [dir=none];
+      rabl_app -> rabl_sup[ dir=none];
+      rabl_sup -> rabl_stat;
+      rabl_sup -> rabl_producer_sup;
+      rabl_sup -> rabl_consumer_sup;
+      rabl_producer_sup -> "rabl_producer_fsm_1..N";
+      "rabl_producer_fsm_1..N" -> local_amqp_client;
+      rabl_consumer_sup -> "rabl_consumer_fsm_1..N";
+      "rabl_consumer_fsm_1..N" -> remote_amqp_client;
+      "rabl_consumer_fsm_1..N" -> local_riak_client;
+}
