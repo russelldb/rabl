@@ -5,10 +5,11 @@ more than one cluster is needed, for example in multiple datacentres,
 Riak's internal replication cannot be used over the WAN.
 
 Rabl is an open source, "realtime" replication library for Riak
-derived databases, which uses [rabbitmq]() as the queue and therefore
-amqp as the transport, between clusters.
+derived databases, which uses [rabbitmq](https://www.rabbitmq.com/) as
+the queue and therefore amqp as the transport, between clusters.
 
-There was a closed source, proprietary Multi-Datacentre Replication
+There was a closed source, proprietary
+[Multi-Datacentre Replication](http://docs.basho.com/riak/kv/2.2.3/using/reference/v2-multi-datacenter/architecture/)
 product sold by Riak's developers, Basho. This product provided both
 "full sync" and "realtime" replication between Riak clusters in
 different datacentres. Rabl only addresses realtime replication.
@@ -28,7 +29,7 @@ the other, or run in active-passive mode, it's up to you.
 
 The term "realtime replication" is how Basho described their
 product. What they meant was a system that would make a best effort to
-replicate a changed object immediatley after a successful write. If
+replicate a changed object immediately after a successful write. If
 for any reason the object failed to be replicated, tough. The "full
 sync" replication run daily, or hourly, or whenever, would take care
 of it.
@@ -40,17 +41,40 @@ Rabl just does this best effort, immediate replication, for now.
 NHS Digital use Riak for a number of critical services. They do not,
 however, use Basho's full sync, as they found it error prone and
 liable to negatively effect their services' performance. In order to
-get NHS Digital off the closed source propriatery Riak Enterprise
+get NHS Digital off the closed source proprietary Riak Enterprise
 codebase, and on to open source, only the realtime replication
 functionality needs adding to open source Riak. That is why we made
 rabl.
 
 Rabl, in this initial and current form, is designed to be dropped into
-a running Riak Enterprise or Riak OSS node. The aim is to minimise the
+a running Riak Enterprise or Riak OSS node. The aim is to minimize the
 number of software transitions/upgrades that must take place to go
 from Riak Enterprise to open source Riak. Once rabl is handling
 realtime replication for a cluster, rolling upgrades to OSS Riak can
 take place.
+
+# Why RabbitMQ?
+
+Very quickly it became clear that one possible design for realtime
+replication was to add objects to a queue to be consumed on remote
+clusters. Though using a queue made sense, writing one did
+not. RabbitMQ is a stable, well used, mature, open source, Erlang,
+queue implementation which NHS-Digital have experience and expertise
+running.
+
+Using RabbitMQ gives rabl a lot:
+
+- Want more reliability? Rabbit supports clustering, ACKs, delivery
+  reports, dead letter queues, blocked connection handling etc.
+- Want more security? Rabbit supports SSL,
+  authentication/authorisation/accounting.
+- Want more monitoring? Rabbit has management and monitoring plug-ins.
+- Want to handle special network conditions? Rabbit has shovel,
+  support for NAT, network tuning options etc.
+
+It makes no sense to develop all this for rabl when it has been
+expertly developed and run in the wild for years by the many RabbitMQ
+contributors and users.
 
 # How it does it?
 
@@ -60,7 +84,7 @@ rabbitmq node installing alongside it, though you could just as well
 use a pair of rabbitmq clusters and
 [shovel](https://www.rabbitmq.com/shovel.html).
 
-Rabl is made up of producers, consumers, and a postcommit hook.
+Rabl is made up of producers, consumers, and a post-commit hook.
 
 A
 [post-commit hook](http://docs.basho.com/riak/kv/2.2.3/developing/usage/commit-hooks/)
@@ -84,7 +108,7 @@ rabbitmq node per Riak node. Each consumer subscribes to the
 
 When a consumer receives a rabbitmq message it unpacks it and uses a
 local `riak_client` to store the object in Riak. Using the correct put
-options means that the postcommit hook is not invoked on the
+options means that the post-commit hook is not invoked on the
 replicated PUT and short circuits the object going around and around
 in replication forever.
 
@@ -118,7 +142,7 @@ connect to the local rabbitmq node, and any/all remote rabbitmq nodes.
 
 1. Start your rabbitmq node(s). Rabl will try and connect as soon as
 it is started. If it can't connect the consumers will poll
-indefinitaly, with back-off (see config), while the producer will poll
+indefinitely, with back-off (see config), while the producer will poll
 until it gives up and thereafter attempt a reconnect when it is called
 by Riak.
 
@@ -126,12 +150,14 @@ by Riak.
 
         rablctl start
 
-    If that doesn't work, then the other option is to connect to riak and start it manualy:
+    If that doesn't work, then the other option is to connect to riak and start it manually:
 
         riak attach
         1> rabl_app:start().
 
-1. Check that rabl started OK by running either `rablctl status` or, if attached `rabl_app:status()`. This will show tha connection status of the consumers and producers.
+1. Check that rabl started OK by running either `rablctl status` or,
+if attached `rabl_app:status()`. This will show the connection status
+of the consumers and producers.
 
 1. Add the rabl hook to a bucket. `rablctl add-hook test` or if
 attached `rabl_util:add_hook(<<"test">>).` will do it.
