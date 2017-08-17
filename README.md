@@ -1,3 +1,5 @@
+**WARNING WARNING, this is pre-release software that is under active development. Here be dragons (and rabbits.)**
+
 # What is rabl?
 
 Riak is a replicated distributed database that runs as a cluster. When
