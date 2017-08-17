@@ -12,11 +12,12 @@
 
 -compile(export_all).
 
--export_type([amqp_connection_params/0, rabbit_message/0, rabbit_return_message/0]).
+-export_type([amqp_connection_params/0, rabbit_message/0, rabbit_management_msg/0]).
 
 -opaque amqp_connection_params() :: #amqp_params_network{} | #amqp_params_direct{}.
 -opaque rabbit_message() :: #'basic.consume_ok'{} | #'basic.cancel_ok'{} | #'basic.deliver'{} | term().
--opaque rabbit_return_message() :: {#'basic.return'{}, #amqp_msg{}} | term().
+-opaque rabbit_management_msg() :: {#'basic.return'{}, #amqp_msg{}} | #'connection.blocked'{} |
+                                   #'connection.unblocked'{} | term().
 
 %% @doc parse the given `AMQPURI' into an opaque term that can be
 %% passed back to `connection_start/1'
@@ -88,20 +89,31 @@ receive_msg({#'basic.deliver'{delivery_tag = Tag}, #'amqp_msg'{payload=Content}}
 receive_msg(Other) ->
     {other, Other}.
 
-%% @doc receive_msg encapsulate rabbitmq specific matching
--spec receive_return(Msg::rabbit_return_message()) ->
-                            {rabbit_return, no_route | other, Payload::binary()} |
-                            {other, Msg::term()}.
-receive_return({#'basic.return'{reply_code=312}, #amqp_msg{payload=Payload}}) ->
+%% @doc receive_management_msg encapsulate rabbitmq specific matching
+%% for management messages
+-spec receive_management_msg(Msg::rabbit_management_msg()) ->
+                                    {rabbit_return, no_route | other, Payload::binary()} |
+                                    {rabbit_blocked, Reason::binary()} |
+                                    rabbit_unblocked |
+                                    {other, Msg::term()}.
+receive_management_msg({#'basic.return'{reply_code=312}, #amqp_msg{payload=Payload}}) ->
     {rabbit_return, no_route, Payload};
-receive_return({#'basic.return'{}, #amqp_msg{payload=Payload}}) ->
+receive_management_msg({#'basic.return'{}, #amqp_msg{payload=Payload}}) ->
     {rabbit_return, other, Payload};
-receive_return(Other) ->
+receive_management_msg(#'connection.blocked'{reason=Reason}) ->
+    {rabbit_blocked, Reason};
+receive_management_msg(#'connection.unblocked'{}) ->
+    rabbit_unblocked;
+receive_management_msg(Other) ->
     {other, Other}.
 
 -spec register_return_handler(Channel::pid(), Handler::pid()) -> ok.
 register_return_handler(Channel, Handler) ->
     amqp_channel:register_return_handler(Channel, Handler).
+
+-spec register_blocked_handler(Connection::pid(), Handler::pid()) -> ok.
+register_blocked_handler(Connection, Handler) ->
+    amqp_connection:register_blocked_handler(Connection, Handler).
 
 -spec ack_msg(Channel::pid(), Tag::term()) -> ok.
 ack_msg(Channel, Tag) when is_pid(Channel) ->

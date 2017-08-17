@@ -9,6 +9,8 @@
 
 -ifdef(TEST).
 -compile(export_all).
+-include_lib("amqp_client/include/amqp_client.hrl").
+-include_lib("eunit/include/eunit.hrl").
 
 mock_rabl_con(Caller) ->
     Pid = spawn(fun mock_rabl_loop/0),
@@ -44,6 +46,26 @@ receive_channel(SelfPid) ->
             ChanPid
     after 5000 -> exit({timeout, channel})
     end.
+
+flush() ->
+    flush(0).
+
+flush(N) ->
+    receive
+        _Msg ->
+            flush(N+1)
+    after 0 ->
+            ?debugFmt("flushed ~p messages~n", [N]),
+            ok
+    end.
+
+%% generate a rabbit connection blocked message
+amqp_blocked_message() ->
+    #'connection.blocked'{reason= <<"test">>}.
+
+%% generate a rabbit connection unblocked message
+amqp_unblocked_message() ->
+    #'connection.unblocked'{}.
 
 -endif.
 

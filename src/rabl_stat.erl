@@ -21,6 +21,7 @@
          get_stats/0,
          params_to_stat_name/1,
          publish/0,
+         publish_blocked/0,
          publish_fail/0,
          return/0,
          riak_put/3,
@@ -88,6 +89,17 @@ consume(StatName, PublishTS, ConsumeTS) ->
 -spec publish_fail() -> ok.
 publish_fail() ->
     folsom_metrics:notify({{rabl, publish_fail}, 1}).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Called when a hook fails to publish a riak object because rabl is
+%% blocked. NOTE also increments the fail count.
+%%%% @end
+%%--------------------------------------------------------------------
+-spec publish_blocked() -> ok.
+publish_blocked() ->
+    folsom_metrics:notify({{rabl, publish_blocked}, 1}),
+    publish_fail().
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -244,6 +256,7 @@ maybe_create_metrics() ->
                               {new_counter, [{rabl, publish}]},
                               {new_counter, [{rabl, consume}]},
                               {new_counter, [{rabl, publish_fail}]},
+                              {new_counter, [{rabl, publish_blocked}]},
                               {new_counter, [{rabl, consume_fail}]},
                               {new_counter, [{rabl, return}]},
                               {new_counter, [{rabl, decode_error}]}
@@ -331,6 +344,7 @@ assert_stats_created() ->
                                                     publish,
                                                     queue_latency,
                                                     put_latency,
+                                                    publish_blocked,
                                                     publish_fail,
                                                     consume_fail,
                                                     return,
