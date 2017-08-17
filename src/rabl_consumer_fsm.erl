@@ -784,15 +784,8 @@ good_rabbit_mocks() ->
     meck:expect(rabl_util, try_ensure_exchange, ['_', '_'], meck:val(ok)),
     meck:expect(rabl_amqp, subscribe, ['_', '_', '_'], meck:val({ok, <<"subscription">>})).
 
-flush() ->
-    receive
-        _ -> flush()
-    after
-        0 -> ok
-    end.
-
 unmock_riak() ->
-    flush(),
+    rabl_mock:flush(),
     meck:unload(rabl_riak).
 
 -endif.

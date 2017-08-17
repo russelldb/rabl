@@ -35,6 +35,8 @@ rablicate(Object) ->
               ok ->
                   rabl_stat:publish(),
                   ok;
+              {error, blocked} ->
+                  rabl_stat:publish_blocked();
               Error ->
                   rabl_stat:publish_fail(),
                   lager:error("Rablication error ~p", [Error]),

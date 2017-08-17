@@ -30,6 +30,13 @@
 %%% period it is in the `disconnected' state, and rejects attempts to
 %%% publish rabbitmq messages.
 %%
+%%% State machine is:
+%%% disconnected -> connected;
+%%% connected -> blocked;
+%%% connected -> disconnected;
+%%% blocked -> connected;
+%%% blocked -> disconnected.
+%%
 %%% @end
 %%% Created :  3 Jul 2017 by Russell Brown <russell@wombat.me>
 %%%-------------------------------------------------------------------
@@ -48,6 +55,7 @@
 %% gen_fsm callbacks
 -export([init/1, connected/3,
          disconnected/3,
+         blocked/3,
          handle_event/3,
          handle_sync_event/4, handle_info/3, terminate/3, code_change/4]).
 
@@ -98,7 +106,7 @@ start_link(Name, AMQPURI) ->
 %% Publish a replication message
 %% @end
 %%--------------------------------------------------------------------
--spec publish(Msg::binary()) -> ok | {error, Reason::term()}.
+-spec publish(Msg::binary()) -> ok | {error, blocked} | {error, Reason::term()}.
 publish(Msg) ->
     case get_worker() of
         {error, no_workers} ->
@@ -213,6 +221,10 @@ disconnected({publish, Msg}, _From, State) ->
             {reply, {error, no_connection}, disconnected, State2}
     end.
 
+%% @private called by publish when the fsm is blocked
+blocked({publish, _Msg}, _From, State) ->
+    {reply, {error, blocked}, blocked, State}.
+
 %% info callbacks
 %% Called when the channel exits
 handle_info({'EXIT', Channel, Reason}, _AnyState, State=#state{channel=Channel}) ->
@@ -236,14 +248,25 @@ handle_info(connect_timeout, connected, State) ->
     %% reconnect.
     {next_state, connected, State};
 handle_info(Other, AnyState, State) ->
-    case rabl_amqp:receive_return(Other) of
-        {rabbit_return, Reason, Msg} ->
-            rabl_stat:return(),
-            log_return(Msg, Reason);
-        {other, _} ->
-            lager:debug("Unexpected Info message ~p~n", [Other])
-    end,
-    {next_state, AnyState, State}.
+    NextState = case rabl_amqp:receive_management_msg(Other) of
+                    {rabbit_return, Reason, Msg} ->
+                        rabl_stat:return(),
+                        log_return(Msg, Reason),
+                        AnyState;
+                    {rabbit_blocked, Reason} ->
+                        lager:warning("Producer connection blocked ~p", [Reason]),
+                        blocked;
+                    rabbit_unblocked when AnyState == blocked ->
+                        lager:info("Producer connection unblocked in state"),
+                        connected;
+                    rabbit_unblocked ->
+                        lager:info("Producer connected unblocked when state ~p", [AnyState]),
+                        AnyState;
+                    {other, _} ->
+                        lager:debug("Unexpected Info message ~p~n", [Other]),
+                        AnyState
+                end,
+    {next_state, NextState, State}.
 
 handle_event(_Event, AnyState, State) ->
     {next_state, AnyState, State}.
@@ -257,7 +280,7 @@ handle_sync_event(_Event, _From, AnyState, State) ->
 terminate(_Reason, _StateName, State) ->
     #state{channel=Channel, connection=Connection} = State,
     case is_pid(Channel) andalso is_process_alive(Channel)
-    andalso is_pid(Connection) andalso is_process_alive(Connection) of
+        andalso is_pid(Connection) andalso is_process_alive(Connection) of
         true ->
             disconnect(Connection, Channel);
         false ->
@@ -354,6 +377,7 @@ start_link_channel(AMQPParams, Queue) ->
                 {ok, Channel} ->
                     link(Channel),
                     rabl_amqp:register_return_handler(Channel, self()),
+                    rabl_amqp:register_blocked_handler(Connection, self()),
                     rabl_util:try_ensure_exchange(Channel, Queue),
                     {ok, Channel, Connection};
                 Error ->
@@ -552,6 +576,7 @@ no_connected_at_start_test() ->
     ?assertMatch({disconnected, #state{connection_attempt_counter=0}}, sys:get_state(Producer)),
     meck:validate(rabl_amqp),
     exit(Producer, kill),
+    teardown(),
     meck:unload(rabl_amqp).
 
 
@@ -595,6 +620,7 @@ publish_connected_test() ->
     meck:unload(rabl_util),
     %% @TODO do it better, please.
     exit(Producer, kill),
+    teardown(),
     ok.
 
 %% @doc checks that producer reconnects on publish if disconnected
@@ -633,17 +659,71 @@ publish_disconnected_test() ->
     timer:sleep(1000),
 
     ?assertMatch({disconnected, #state{connection_attempt_counter=0}}, sys:get_state(Producer)),
+
+    %% match the expect on real arguments
+    meck:expect(rabl_amqp, publish, ['_', ClusterName, ClusterName, <<"test">>],
+                meck:val(ok)),
+
     PubRes = rabl_producer_fsm:publish(<<"test">>),
     ?assertEqual(ok, PubRes),
     ?assertMatch({connected, _}, sys:get_state(Producer)),
-
     exit(Producer, kill),
-
     meck:validate(rabl_amqp),
     meck:unload(rabl_amqp),
     meck:validate(rabl_util),
     meck:unload(rabl_util),
-
+    teardown(),
     ok.
+
+blocked_connection_test() ->
+    ClusterName = <<"test_cluster">>,
+    Delay = 1000,
+    application:set_env(rabl, producers, [{1, "amqp://localhost"}]),
+    application:set_env(rabl, reconnect_delay_millis, Delay),
+    application:set_env(rabl, cluster_name, ClusterName),
+
+    load_producer(),
+
+    meck:new(rabl_amqp, [passthrough]),
+    meck:new(rabl_util, [passthrough]),
+    Pid = self(),
+    meck:expect(rabl_amqp, connection_start, fun(_) ->
+                                                     {ok, rabl_mock:mock_rabl_con(Pid)}
+                                             end),
+    meck:expect(rabl_amqp, channel_open, fun(_) ->
+                                                 {ok, rabl_mock:mock_rabl_chan(Pid)}
+                                         end),
+
+    meck:expect(rabl_util, try_ensure_exchange, ['_', ClusterName], meck:val(ok)),
+
+    {ok, Producer} = start_link(hd(?GENERATED_MOD:workers()), "amqp://localhost"),
+    unlink(Producer),
+
+    Channel = rabl_mock:receive_channel(Pid),
+    %% match the expect on real arguments
+    meck:expect(rabl_amqp, publish, [Channel, ClusterName, ClusterName, <<"test">>],
+                meck:val(ok)),
+
+    Producer ! rabl_mock:amqp_blocked_message(),
+
+    PubRes = publish(<<"test">>),
+    ?assertEqual({error, blocked}, PubRes),
+
+    Producer ! rabl_mock:amqp_unblocked_message(),
+
+    PubRes2 = publish(<<"test">>),
+    ?assertEqual(ok, PubRes2),
+
+    meck:validate(rabl_amqp),
+    meck:validate(rabl_util),
+    meck:unload(rabl_amqp),
+    meck:unload(rabl_util),
+    %% @TODO do it better, please.
+    exit(Producer, kill),
+    teardown(),
+    ok.
+
+teardown() ->
+    rabl_mock:flush().
 
 -endif.
