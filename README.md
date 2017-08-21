@@ -126,48 +126,90 @@ deployment.
 The steps below will be cleaned up and made more user friendly, but
 for now, if you want to try rabl, here is what you must do:
 
-1. clone rabl and build it
+### Get rabl
+
+clone rabl and build it
 
          git clone https://github.com/russelldb/rabl.git
          cd rabl
          rebar3 compile
 
-1. Configure rabl in Riak's `advanced.config`. There is an
+### Setup rabl
+
+Configure rabl in Riak's `advanced.config`. There is an
 [example config](config/sys.config) in the `config` directory of this
 project. It is commented. Essentially you tell rabl, by means of
 [amqp urls](https://www.rabbitmq.com/uri-query-parameters.html) how to
 connect to the local rabbitmq node, and any/all remote rabbitmq nodes.
 
-1. Start Riak with rabl's libraries. You can either drop all the contents of `_build/default/lib/` into your Riak lib (for example `/usr/lib64/riak/lib/`) OR start Riak with `ERL_LIBS` pointing at `rabl`:
+### Start Riak with rabl
+
+Start Riak with rabl's libraries. You can either drop all the contents
+of `_build/default/lib/` into your Riak lib (for example
+`/usr/lib64/riak/lib/`) OR start Riak with `ERL_LIBS` pointing at
+`rabl`:
 
          ERL_LIBS=/Path/To/rabl/_build/default/lib/ riak start
 
-1. Start your rabbitmq node(s). Rabl will try and connect as soon as
-it is started. If it can't connect the consumers will poll
-indefinitely, with back-off (see config), while the producer will poll
-until it gives up and thereafter attempt a reconnect when it is called
-by Riak.
+### Start rabbitmq
 
-1. Start rabl. There is a file `rablctl` in `bin/` that may work, but is under development. Drop in your riak installs `bin` directory and call
+Start your rabbitmq node(s). Rabl will try and connect as soon as it
+is started. If it can't connect the consumers will poll indefinitely,
+with back-off (see config), while the producer will poll until it
+gives up and thereafter attempt a reconnect when it is called by Riak.
 
-        rablctl start
+### Start rabl
 
-    If that doesn't work, then the other option is to connect to riak and start it manually:
+Start rabl. There is a file `rablctl.escript` in `bin/` that should
+work, but is under development. It uses riak's `escript`
+[command](https://www.tiot.jp/riak-docs/riak/kv/2.2.3/using/admin/riak-cli/#escript). All
+the following commands use the same basic format.
 
-        riak attach
-        1> rabl_app:start().
+        riak escript FULL_PATH_TO/rablctl.escript NODE COOKIE COMMAND [ARG]
 
-1. Check that rabl started OK by running either `rablctl status` or,
-if attached `rabl_app:status()`. This will show the connection status
-of the consumers and producers.
+If for any reason `rablctl.escript` does not work for you, see [riak attach below](#riak-atach). Start rabl with
 
-1. Add the rabl hook to a bucket. `rablctl add-hook test` or if
-attached `rabl_util:add_hook(<<"test">>).` will do it.
+        riak escript PATH/rablctl.escript riak@host riak start
 
-1. Rablicate! A quick way to test this, if attached would be to call
-`rabl_util:put(<<"test">>, <<"key1">>, <<"val1">>).` on one cluster,
-and then get the object on the other cluster.
+You should just get `ok` as a response. You need to start rabl on EACH
+and EVERY riak node that you want to replicate to and from.
 
-1. If you want to see how it is going, you can call `rablctl stats`
-or, if attached `rabl_util:get_flat_stats().` To see some latency
-histograms and counters from rabl.
+You can Check that rabl started OK by running
+
+        riak escript PATH/rablctl.escript riak@host riak status
+
+ This will show the connection status of the consumers and
+ producers. Look for `connected` for the producer(s), and `consuming`
+ for the consumer(s)
+
+### Add the rabl hook
+
+Add the rabl hook to a bucket:
+
+        riak escript PATH/rablctl.escript riak@host riak add-hook test
+
+
+### Rablicate!
+
+A quick way to test that rabl replication is working is to attach to
+the riak node and call `rabl_util:put(<<"test">>, <<"key1">>,
+<<"val1">>).` on one cluster, and then get the object on the other
+cluster.
+
+### Stats
+
+If you want to see how it is going, you can call
+
+         riak escript PATH/rablctl.escript riak@host riak stats
+
+to see some latency histograms and counters from rabl.
+
+#### riak attach
+
+If for any reason the rablctl.escript doesn't work for you, you can use `riak attach` and run the following commands:
+
+    rabl_app:start(). %% start rabl
+    rabl_app:status(). %% see worker status
+    rabl_util:add_hook(<<"test">>). %% add hook to bucket <<"test">>
+    rabl_util:get_flat_stats(). %% see stats
+    application:stop(rabl). %% stop rabl

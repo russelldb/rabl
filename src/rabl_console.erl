@@ -13,46 +13,35 @@
 -include_lib("eunit/include/eunit.hrl").
 -endif.
 
--spec show_config(list()) -> ok.
-show_config([]) ->
-    io:format("rabl env: ~p~n", [application:get_all_env(rabl)]).
+-spec show_config() -> list().
+show_config() ->
+    application:get_all_env(rabl).
 
--spec add_hook(list()) -> ok.
-add_hook([Bucket]) ->
-    BinBucket = list_to_binary(Bucket),
-    io:format("adding rabl_hook to bucket ~p~n", [BinBucket]),
+-spec add_hook(binary()) -> ok.
+add_hook(BinBucket) ->
     rabl_util:add_hook(BinBucket),
-    BucketProps = rabl_util:get_bucket(BinBucket),
-    io:format("ok: ~p~n", [BucketProps]).
+    rabl_util:get_bucket(BinBucket).
 
--spec load([]) -> ok.
-load([]) ->
-    ok = rabl_util:load(),
-    io:format("ok~n",[]).
+-spec load() -> ok.
+load() ->
+    rabl_util:load().
 
--spec start([]) -> ok.
-start([]) ->
-    io:format("Starting rabl app~n", []),
-    Res = rabl_app:start(),
-    io:format("~p~n", [Res]).
+start() ->
+    rabl_app:start().
 
--spec setup([]) -> ok.
-setup([]) ->
-    io:format("Setting up queues from local rabl config~n", []),
+setup() ->
     rabl_util:setup_local_smoke().
 
--spec stop([]) -> ok.
-stop([]) ->
-    io:format("Stopping rabl app~n", []),
-    Res = application:stop(rabl),
-    io:format("~p~n", [Res]).
+stop() ->
+    application:stop(rabl).
 
--spec status([]) -> ok.
-status([]) ->
-    Status = rabl_app:status(),
-    io:format("~p~n", [Status]).
+status() ->
+    case whereis(rabl_sup) of
+        undefined ->
+            rabl_not_running;
+        Pid when is_pid(Pid) ->
+            rabl_app:status()
+    end.
 
--spec stats([]) -> ok.
-stats([]) ->
-    FlattendStats = rabl_util:get_flat_stats(),
-    io:format("~p~n", [FlattendStats]).
+stats() ->
+    rabl_util:get_flat_stats().
