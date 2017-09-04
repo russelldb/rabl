@@ -39,56 +39,20 @@ from continued development effort on a common code base.
 
 ### Why is Rabl Realtime Only?
 
-NHS do not use Basho's fullsync product. They use realtime
-replication coupled with a technique they developed for fullsync
-called "delta touch". Delta Touch exploits the observation that
-fullsync is only needed to mop up any changes that somehow failed to
-be replicated in realtime.
+It is assumed that Rabl will be used in conjunction with a background
+fullsync mechanism.  This might be:
 
-#### Delta-Touch
-
-Every time an object is written an index entry of the _last modified
-time_ and an index that is a _serial change number_ for the object is
-updated. The indexes are queried regularly (every few minutes), and
-for varying time intervals (in terms of modified dates). For example:
-frequently query for the past hour, but only occasionally query for a
-longer time period with the longer the time period the less frequent
-the query.  The varied query time periods ensures they don't miss
-deltas if the query failed to run for some period of time, or when an
-object appears on the index after the _last modified time_ has passed.
-
-Both clusters run the delta-touch queries, but only the more
-up-to-date site prompts the "touch". A touch is an object update to
-provoke realtime replication. If a source side sees the sink is more
-up-to-date it logs an error, which is picked up in a chart, and human
-intervention manages a situation where deltas are being discovered but
-not fixed.
-
-Martin Sumner is working on a new and different fullsync mechanism,
-(some hints
-[here](https://github.com/martinsumner/leveled/blob/master/docs/ANTI_ENTROPY.md))
-but it is not ready yet. Maybe in the light of recent events it makes
-more sense to focus on the existing code base, only time and a look at
-the code will tell. If nothing else an open, side-by-side comparison
-will at least now be possible.
-
-#### Realtime, All The Time
-
-At the time of writing NHS-Digital only use realtime replication and
-so only need a realtime replication replacement to move to open source
-Riak.
-
-Upgrading a running Riak cluster with a large amount of data can be
-time consuming. We want to minimise the number of operational events
-at NHS-Digital. Rabl is designed so that it can be deployed without a
-node upgrade. A simple transition of adding the rabl and rabbit
-libraries, updating Riak's `advanced.config`, and restarting Riak is
-all it takes to deploy rabl. This means there are only two steps to
-take NHS-Digital from proprietary RiakEE to Open Source Riak with
-realtime replication:
-
-1. Deploy rabl
-2. Update to Open Source Riak with rabl
+* One of the generation of fullsync mechanisms available previously in
+  Riak MDC, and now potentially to be open-sourced by bet365.
+* Alternative current mechanisms that exploit other existing
+  open-source Riak features (for example the NHS had issues with Riak
+  fullsync and replaced it with their own in-house solution called
+  _DeltaTouch_ which relies on secondary indexes tracking last
+  modified dates and versions of objects.)
+* New proposals to more efficiently exchange the whole database state
+  and/or the state of recent changes (some hints
+  [here](https://github.com/martinsumner/leveled/blob/master/docs/ANTI_ENTROPY.md)
+  of the work in progress in this area)
 
 ### Why RabbitMQ?
 
