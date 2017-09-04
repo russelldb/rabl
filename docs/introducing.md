@@ -25,7 +25,7 @@ local cluster. Fullsync, as the name suggests, runs at some regular
 interval and ensures that any pair of clusters are up-to-date with
 each other and contain all the same data. A cluster that is
 replicating objects is called the _source_ cluster, and one that is
-recieving replicated objects is called the _sink_ cluster.
+receiving replicated objects is called the _sink_ cluster.
 
 ### Why Open Source MDC?
 
